@@ -50,4 +50,12 @@ public final class ThreadProperty {
     public static String get(String key) {
         return PROPS.get().getProperty(key);
     }
+
+    /**
+     * Remove a property shared
+     */
+    public static void remove(String key) {
+        PROPS.get().remove(key);
+    }
+
 }
