@@ -110,6 +110,7 @@ public class CucumberRunner {
         uniqueGlue.add("classpath:com/stratio/intelligence/testsAT/specs");
         uniqueGlue.add("classpath:com/stratio/postgresbd/testsAT/specs");
         uniqueGlue.add("classpath:com/stratio/postgresql/testsAT/specs");
+        uniqueGlue.add("classpath:com/stratio/zookeeper/testsAT/specs");
         uniqueGlue.add("classpath:com/stratio/universe/testsAT/specs");
         uniqueGlue.add("classpath:com/stratio/paas/dgDatadictionaryAT/specs");
         uniqueGlue.add("classpath:com/stratio/paas/dgtests/specs");
