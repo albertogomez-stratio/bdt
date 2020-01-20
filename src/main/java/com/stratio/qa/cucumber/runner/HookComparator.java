@@ -14,15 +14,23 @@
  * limitations under the License.
  */
 
-package com.stratio.qa.cucumber.converter;
+package com.stratio.qa.cucumber.runner;
 
-import cucumber.api.Transformer;
+import cucumber.runtime.HookDefinition;
 
-public class BooleanConverter extends Transformer<Boolean> {
+import java.util.Comparator;
+
+class HookComparator implements Comparator<HookDefinition> {
+    private final boolean ascending;
+
+    HookComparator(boolean ascending) {
+        this.ascending = ascending;
+    }
 
     @Override
-    public Boolean transform(String input) {
-        return "".equals(input);
-
+    public int compare(HookDefinition hook1, HookDefinition hook2) {
+        int x = hook1.getOrder();
+        int y = hook2.getOrder();
+        return ascending ? Integer.compare(x, y) : Integer.compare(y, x);
     }
 }

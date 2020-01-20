@@ -19,6 +19,10 @@ package com.stratio.qa.specs;
 import com.datastax.driver.core.ColumnDefinitions;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import com.jayway.jsonpath.Configuration;
 import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
@@ -34,8 +38,10 @@ import com.ning.http.client.Response;
 import com.ning.http.client.cookie.Cookie;
 import com.stratio.qa.conditions.Conditions;
 import com.stratio.qa.utils.*;
-import cucumber.api.DataTable;
-
+import io.cucumber.datatable.DataTable;
+import cucumber.api.Scenario;
+import org.apache.commons.collections.IteratorUtils;
+import org.apache.commons.io.FileUtils;
 import org.assertj.core.api.Assertions;
 import org.assertj.core.api.Condition;
 import org.hjson.JsonObject;
@@ -51,15 +57,17 @@ import org.openqa.selenium.remote.RemoteWebDriver;
 import org.reflections.Reflections;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.commons.io.FileUtils;
-import org.apache.commons.collections.IteratorUtils;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.*;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.Future;
 import java.util.regex.Matcher;
@@ -68,10 +76,11 @@ import java.util.regex.Pattern;
 import static com.stratio.qa.assertions.Assertions.assertThat;
 import static org.testng.Assert.fail;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
+import java.text.ParseException;
+import java.util.Date;
+
+import org.everit.json.schema.loader.SchemaLoader;
+import org.testng.Assert;
 
 public class CommonG {
 
@@ -128,6 +137,10 @@ public class CommonG {
     private ZookeeperSecUtils zkSecClient;
 
     private Optional<SearchResult> previousLdapResults;
+
+    private Connection myConnection = null;
+
+    private Map<String, List<String>> previousSqlResult = null;
 
     /**
      * Checks if a given string matches a regular expression or contains a string
@@ -349,6 +362,7 @@ public class CommonG {
      * @param method        class of element to be searched
      * @param element       webElement searched in selenium context
      * @param expectedCount integer. Expected number of elements.
+     * @param scenario      Cucumber Scenario
      * @return List(WebElement)
      * @throws IllegalAccessException   exception
      * @throws IllegalArgumentException exception
@@ -357,7 +371,7 @@ public class CommonG {
      * @throws ClassNotFoundException   exception
      */
     public List<WebElement> locateElement(String method, String element,
-                                          Integer expectedCount) throws ClassNotFoundException, NoSuchFieldException, SecurityException, IllegalArgumentException, IllegalAccessException {
+                                          Integer expectedCount, Scenario scenario) throws ClassNotFoundException, NoSuchFieldException, SecurityException, IllegalArgumentException, IllegalAccessException {
 
         List<WebElement> wel = null;
 
@@ -381,7 +395,7 @@ public class CommonG {
 
         if (expectedCount != -1) {
             PreviousWebElements pwel = new PreviousWebElements(wel);
-            assertThat(this, pwel).as("Element count doesnt match").hasSize(expectedCount);
+            assertThat(this, scenario, pwel).as("Element count doesnt match").hasSize(expectedCount);
         }
 
         return wel;
@@ -394,8 +408,8 @@ public class CommonG {
      * @param type   type
      * @return String
      */
-    public String captureEvidence(WebDriver driver, String type) {
-        return captureEvidence(driver, type, "");
+    public String captureEvidence(WebDriver driver, String type, Scenario scenario) {
+        return captureEvidence(driver, type, "", scenario);
     }
 
     /**
@@ -406,7 +420,7 @@ public class CommonG {
      * @param suffix suffix
      * @return String
      */
-    public String captureEvidence(WebDriver driver, String type, String suffix) {
+    public String captureEvidence(WebDriver driver, String type, String suffix, Scenario scenario) {
         String testSuffix = System.getProperty("TESTSUFFIX");
         String dir = "./target/executions/";
         if (testSuffix != null) {
@@ -473,7 +487,8 @@ public class CommonG {
                     .getCoordinates().inViewPort();
 
             if (currentBrowser.startsWith("chrome")
-                    || currentBrowser.startsWith("droidemu")) {
+                    || currentBrowser.startsWith("droidemu")
+                    || (System.getProperty("SELENIUM_GRID") == null && currentBrowser.contains("chrome"))) {
                 Actions actions = new Actions(driver);
                 actions.keyDown(Keys.CONTROL).sendKeys(Keys.HOME).perform();
                 actions.keyUp(Keys.CONTROL).perform();
@@ -485,6 +500,7 @@ public class CommonG {
             }
             try {
                 FileUtils.copyFile(file, new File(outputFile));
+                addPngFileToReport(file, scenario);
             } catch (IOException e) {
                 logger.error("Exception on copying browser screen capture", e);
             }
@@ -499,7 +515,6 @@ public class CommonG {
         // cuts last image just in case it dupes information
         Integer finalHeight = 0;
         Integer finalWidth = 0;
-
         File trailingImage = capture.get(capture.size() - 1);
         capture.remove(capture.size() - 1);
 
@@ -560,12 +575,10 @@ public class CommonG {
 
         Boolean atBottom = false;
         Integer windowSize = ((Long) ((JavascriptExecutor) driver)
-                .executeScript("return document.documentElement.clientHeight"))
+                .executeScript("return document.documentElement.scrollHeight"))
                 .intValue();
-
         Integer accuScroll = 0;
         Integer newTrailingImageHeight = 0;
-
         try {
             while (!atBottom) {
 
@@ -574,10 +587,11 @@ public class CommonG {
                         .getScreenshotAs(OutputType.FILE));
 
                 ((JavascriptExecutor) driver).executeScript("if(window.screen)"
-                        + " {window.scrollBy(0," + windowSize + ");};");
+                        + " {window.scrollBy(0," + getDocumentHeight(driver) + ");};");
 
-                accuScroll += windowSize;
-                if (getDocumentHeight(driver) <= accuScroll) {
+                accuScroll += getDocumentHeight(driver);
+
+                if (windowSize <= accuScroll) {
                     atBottom = true;
                 }
             }
@@ -586,13 +600,32 @@ public class CommonG {
             logger.error("Interrupted waits among scrolls", e);
         }
 
-        newTrailingImageHeight = accuScroll - getDocumentHeight(driver);
+        newTrailingImageHeight = accuScroll - windowSize;
         return adjustLastCapture(newTrailingImageHeight, capture);
     }
 
     private Integer getDocumentHeight(WebDriver driver) {
-        WebElement body = driver.findElement(By.tagName("html"));
-        return body.getSize().getHeight();
+        return ((Long) ((JavascriptExecutor) driver)
+                .executeScript("return document.documentElement.clientHeight"))
+                .intValue();
+    }
+
+    /**
+     * Add png file to cucumber report (it's embed on scenario)
+     *
+     * @param pngFile Screenshot file
+     */
+    private void addPngFileToReport(File pngFile, Scenario scenario) {
+        if (scenario != null) {
+            try {
+                BufferedImage bImage = ImageIO.read(pngFile);
+                ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                ImageIO.write(bImage, "png", bos);
+                scenario.embed(bos.toByteArray(), "image/png");
+            } catch (IOException e) {
+                logger.error("Error adding screenshot in cucumber report", e);
+            }
+        }
     }
 
     /**
@@ -687,13 +720,11 @@ public class CommonG {
         }
         String text = writer.toString();
 
-        String std = text.replace("\r", "").replace("\n", ""); // make sure we have unix style text regardless of the input
-
-
         if ("json".equals(type)) {
+            String std = text.replace("\r", "").replace("\n", ""); // make sure we have unix style text regardless of the input
             result = JsonValue.readHjson(std).asObject().toString();
         } else {
-            result = std;
+            result = text;
         }
         return result;
     }
@@ -798,27 +829,39 @@ public class CommonG {
         Double jNumber;
         Long jLong;
         Boolean jBoolean;
+        boolean array = false;
 
-        if ("json".equals(type)) {
+        if ("json".equals(type) || "gov".equals(type)) {
             LinkedHashMap jsonAsMap = new LinkedHashMap();
-            for (int i = 0; i < modifications.raw().size(); i++) {
-                String composeKey = modifications.raw().get(i).get(0);
-                String operation = modifications.raw().get(i).get(1);
-                String newValue = modifications.raw().get(i).get(2);
+            for (int i = 0; i < modifications.cells().size(); i++) {
+                String composeKey = modifications.cells().get(i).get(0);
+                String operation = modifications.cells().get(i).get(1);
+                String newValue = modifications.cells().get(i).get(2);
 
-                if (modifications.raw().get(0).size() == 4) {
-                    typeJsonObject = modifications.raw().get(i).get(3);
+                if (modifications.cells().get(0).size() == 4) {
+                    typeJsonObject = modifications.cells().get(i).get(3);
                 }
 
-                JsonObject object = new JsonObject(JsonValue.readHjson(modifiedData).asObject());
-                removeNulls(object);
-                modifiedData = JsonValue.readHjson(object.toString()).toString();
+                if (modifiedData.startsWith("[") && modifiedData.endsWith("]")) {
+                    modifiedData = "{\"content\":" + modifiedData + "}";
+                    array = true;
+                } else {
+                    JsonObject object = new JsonObject(JsonValue.readHjson(modifiedData).asObject());
+                    removeNulls(object);
+                    modifiedData = JsonValue.readHjson(object.toString()).toString();
+                }
 
                 switch (operation.toUpperCase()) {
                     case "DELETE":
+                        if (array) {
+                            composeKey = "$.content" + composeKey.substring(1, composeKey.length());
+                        }
                         jsonAsMap = JsonPath.parse(modifiedData).delete(composeKey).json();
                         break;
                     case "ADD":
+                        if (array) {
+                            composeKey = "$.content" + composeKey.substring(1, composeKey.length());
+                        }
                         // Get the last key
                         String newKey;
                         String newComposeKey;
@@ -873,17 +916,29 @@ public class CommonG {
 //                        jsonAsMap = JsonPath.parse(modifiedData).put(newComposeKey, newKey, newValue).json();
 //                        break;
                     case "UPDATE":
+                        if (array) {
+                            composeKey = "$.content" + composeKey.substring(1, composeKey.length());
+                        }
                         jsonAsMap = JsonPath.parse(modifiedData).set(composeKey, newValue).json();
                         break;
                     case "APPEND":
+                        if (array) {
+                            composeKey = "$.content" + composeKey.substring(1, composeKey.length());
+                        }
                         String appendValue = JsonPath.parse(modifiedData).read(composeKey);
                         jsonAsMap = JsonPath.parse(modifiedData).set(composeKey, appendValue + newValue).json();
                         break;
                     case "PREPEND":
+                        if (array) {
+                            composeKey = "$.content" + composeKey.substring(1, composeKey.length());
+                        }
                         String prependValue = JsonPath.parse(modifiedData).read(composeKey);
                         jsonAsMap = JsonPath.parse(modifiedData).set(composeKey, newValue + prependValue).json();
                         break;
                     case "REPLACE":
+                        if (array) {
+                            composeKey = "$.content" + composeKey.substring(1, composeKey.length());
+                        }
                         if ("array".equals(typeJsonObject)) {
                             jArray = new JSONArray();
                             if (!"[]".equals(newValue)) {
@@ -925,6 +980,9 @@ public class CommonG {
                             break;
                         }
                     case "ADDTO":
+                        if (array) {
+                            composeKey = "$.content" + composeKey.substring(1, composeKey.length());
+                        }
                         if ("array".equals(typeJsonObject)) {
                             jArray = new JSONArray();
                             if (!"[]".equals(newValue)) {
@@ -962,6 +1020,9 @@ public class CommonG {
                             break;
                         }
                     case "HEADER":
+                        if (array) {
+                            composeKey = "$.content" + composeKey.substring(1, composeKey.length());
+                        }
                         this.headers.put(composeKey, newValue);
                         break;
                     default:
@@ -975,10 +1036,10 @@ public class CommonG {
                 modifiedData = modifiedData.replaceAll("\"TO_BE_NULL\"", "null");
             }
         } else {
-            for (int i = 0; i < modifications.raw().size(); i++) {
-                String value = modifications.raw().get(i).get(0);
-                String operation = modifications.raw().get(i).get(1);
-                String newValue = modifications.raw().get(i).get(2);
+            for (int i = 0; i < modifications.cells().size(); i++) {
+                String value = modifications.cells().get(i).get(0);
+                String operation = modifications.cells().get(i).get(1);
+                String newValue = modifications.cells().get(i).get(2);
 
                 switch (operation.toUpperCase()) {
                     case "DELETE":
@@ -1003,6 +1064,11 @@ public class CommonG {
                 }
             }
         }
+
+        if (array) {
+            modifiedData = modifiedData.substring(11, modifiedData.length() - 1);
+        }
+
         return modifiedData;
     }
 
@@ -1061,8 +1127,9 @@ public class CommonG {
         Future<Response> response = null;
         BoundRequestBuilder request;
         Realm realm = null;
-
-
+        String govTenant = System.getProperty("GOV_TENANT") != null ? System.getProperty("GOV_TENANT") : "NONE";
+        String govRolesID = System.getProperty("GOV_ROLESID");
+        String govUserID = System.getProperty("GOV_USERID") != null ? System.getProperty("GOV_USERID") : "admin";
         if (this.getRestHost() == null) {
             throw new Exception("Rest host has not been set");
         }
@@ -1092,10 +1159,16 @@ public class CommonG {
                 request = this.getClient().prepareGet(restURL + endPoint);
 
                 if ("json".equals(type)) {
-                    request = request.setHeader("Content-Type", "application/json");
+                    request = request.setHeader("Content-Type", "application/json; charset=UTF-8");
                 } else if ("string".equals(type)) {
                     this.getLogger().debug("Sending request as: {}", type);
-                    request = request.setHeader("Content-Type", "application/x-www-form-urlencoded");
+                    request = request.setHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+                } else if ("gov".equals(type)) {
+                    request = request.setHeader("Content-Type", "application/json; charset=UTF-8");
+                    request = request.setHeader("Accept", "application/json");
+                    request = request.setHeader("X-TenantID", govTenant);
+                    request = request.setHeader("X-RolesID", govRolesID);
+                    request = request.setHeader("X-UserID", govUserID);
                 }
 
                 if (this.getResponse() != null) {
@@ -1126,13 +1199,32 @@ public class CommonG {
 
                 response = request.execute();
                 break;
+
             case "DELETE":
-                request = this.getClient().prepareDelete(restURL + endPoint);
-
-                if (this.getResponse() != null) {
-                    request = request.setCookies(this.getResponse().getCookies());
+                if (data == "") {
+                    request = this.getClient().prepareDelete(restURL + endPoint);
+                    if ("gov".equals(type)) {
+                        request = request.setHeader("Content-Type", "application/json; charset=UTF-8");
+                        request = request.setHeader("Accept", "application/json");
+                        request = request.setHeader("X-TenantID", govTenant);
+                        request = request.setHeader("X-RolesID", govRolesID);
+                        request = request.setHeader("X-UserID", govUserID);
+                    }
+                } else {
+                    request = this.getClient().prepareDelete(restURL + endPoint).setBody(data);
+                    if ("json".equals(type)) {
+                        request = request.setHeader("Content-Type", "application/json; charset=UTF-8");
+                    } else if ("string".equals(type)) {
+                        this.getLogger().debug("Sending request as: {}", type);
+                        request = request.setHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+                    } else if ("gov".equals(type)) {
+                        request = request.setHeader("Content-Type", "application/json; charset=UTF-8");
+                        request = request.setHeader("Accept", "application/json");
+                        request = request.setHeader("X-TenantID", govTenant);
+                        request = request.setHeader("X-RolesID", govRolesID);
+                        request = request.setHeader("X-UserID", govUserID);
+                    }
                 }
-
                 if (this.getSeleniumCookies().size() > 0) {
                     for (org.openqa.selenium.Cookie cookie : this.getSeleniumCookies()) {
                         request.addCookie(new Cookie(cookie.getName(), cookie.getValue(),
@@ -1154,7 +1246,11 @@ public class CommonG {
                     request = request.setRealm(realm);
                 }
 
-                response = request.execute();
+                if (data == "") {
+                    response = request.execute();
+                } else {
+                    response = this.getClient().executeRequest(request.build());
+                }
                 break;
             case "POST":
                 if (data == null) {
@@ -1163,10 +1259,16 @@ public class CommonG {
                 } else {
                     request = this.getClient().preparePost(restURL + endPoint).setBody(data);
                     if ("json".equals(type)) {
-                        request = request.setHeader("Content-Type", "application/json");
+                        request = request.setHeader("Content-Type", "application/json; charset=UTF-8");
                     } else if ("string".equals(type)) {
                         this.getLogger().debug("Sending request as: {}", type);
-                        request = request.setHeader("Content-Type", "application/x-www-form-urlencoded");
+                        request = request.setHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+                    } else if ("gov".equals(type)) {
+                        request = request.setHeader("Content-Type", "application/json; charset=UTF-8");
+                        request = request.setHeader("Accept", "application/json");
+                        request = request.setHeader("X-TenantID", govTenant);
+                        request = request.setHeader("X-RolesID", govRolesID);
+                        request = request.setHeader("X-UserID", govUserID);
                     }
 
                     if (this.getResponse() != null) {
@@ -1204,9 +1306,61 @@ public class CommonG {
                 } else {
                     request = this.getClient().preparePut(restURL + endPoint).setBody(data);
                     if ("json".equals(type)) {
-                        request = request.setHeader("Content-Type", "application/json");
+                        request = request.setHeader("Content-Type", "application/json; charset=UTF-8");
                     } else if ("string".equals(type)) {
-                        request = request.setHeader("Content-Type", "application/x-www-form-urlencoded");
+                        request = request.setHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+                    } else if ("gov".equals(type)) {
+                        request = request.setHeader("Content-Type", "application/json; charset=UTF-8");
+                        request = request.setHeader("Accept", "application/json");
+                        request = request.setHeader("X-TenantID", govTenant);
+                        request = request.setHeader("X-RolesID", govRolesID);
+                        request = request.setHeader("X-UserID", govUserID);
+                    }
+
+                    if (this.getResponse() != null) {
+                        request = request.setCookies(this.getResponse().getCookies());
+                    }
+
+                    if (this.getSeleniumCookies().size() > 0) {
+                        for (org.openqa.selenium.Cookie cookie : this.getSeleniumCookies()) {
+                            request.addCookie(new Cookie(cookie.getName(), cookie.getValue(),
+                                    false, cookie.getDomain(), cookie.getPath(), 99, false, false));
+                        }
+                    }
+
+                    for (Cookie cook : this.getCookies()) {
+                        request = request.addCookie(cook);
+                    }
+
+                    if (!this.headers.isEmpty()) {
+                        for (Map.Entry<String, String> header : headers.entrySet()) {
+                            request = request.setHeader(header.getKey(), header.getValue());
+                        }
+                    }
+
+                    if (user != null) {
+                        request = request.setRealm(realm);
+                    }
+
+                    response = this.getClient().executeRequest(request.build());
+                    break;
+                }
+            case "PATCH":
+                if (data == null) {
+                    Exception missingFields = new Exception("Missing fields in request.");
+                    throw missingFields;
+                } else {
+                    request = this.getClient().preparePatch(restURL + endPoint).setBody(data);
+                    if ("json".equals(type)) {
+                        request = request.setHeader("Content-Type", "application/json; charset=UTF-8");
+                    } else if ("string".equals(type)) {
+                        request = request.setHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+                    } else if ("gov".equals(type)) {
+                        request = request.setHeader("Content-Type", "application/json; charset=UTF-8");
+                        request = request.setHeader("Accept", "application/json");
+                        request = request.setHeader("X-TenantID", govTenant);
+                        request = request.setHeader("X-RolesID", govRolesID);
+                        request = request.setHeader("X-UserID", govUserID);
                     }
 
                     if (this.getResponse() != null) {
@@ -1238,7 +1392,6 @@ public class CommonG {
                     break;
                 }
             case "CONNECT":
-            case "PATCH":
             case "HEAD":
             case "OPTIONS":
             case "REQUEST":
@@ -1262,7 +1415,8 @@ public class CommonG {
      * @throws Exception exception
      */
     @Deprecated
-    public Future<Response> generateRequest(String requestType, boolean secure, String endPoint, String data, String type, String codeBase64) throws Exception {
+    public Future<Response> generateRequest(String requestType, boolean secure, String endPoint, String data, String
+            type, String codeBase64) throws Exception {
         return generateRequest(requestType, false, null, null, endPoint, data, type, "");
     }
 
@@ -1282,7 +1436,8 @@ public class CommonG {
      * @throws InvocationTargetException exception
      */
 
-    public void setPreviousElement(String element, String value) throws NoSuchFieldException, SecurityException, IllegalArgumentException, IllegalAccessException, InstantiationException, ClassNotFoundException, NoSuchMethodException, InvocationTargetException {
+    public void setPreviousElement(String element, String value) throws
+            NoSuchFieldException, SecurityException, IllegalArgumentException, IllegalAccessException, InstantiationException, ClassNotFoundException, NoSuchMethodException, InvocationTargetException {
         Reflections reflections = new Reflections("com.stratio");
         Set classes = reflections.getSubTypesOf(CommonG.class);
 
@@ -1343,6 +1498,17 @@ public class CommonG {
         this.seleniumCookies = cookies;
     }
 
+    public boolean cookieExists(String cookieName) {
+        if (this.getSeleniumCookies() != null && this.getSeleniumCookies().size() != 0) {
+            for (org.openqa.selenium.Cookie cookie : this.getSeleniumCookies()) {
+                if (cookie.getName().contains(cookieName)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     public Map<String, String> getHeaders() {
         return headers;
     }
@@ -1369,14 +1535,14 @@ public class CommonG {
     public void resultsMustBeCSV(DataTable expectedResults) throws Exception {
         if (getCSVResults() != null) {
             //Map for cucumber expected results
-            List<Map<String, Object>> resultsListExpected = new ArrayList<Map<String, Object>>();
-            Map<String, Object> resultsCucumber;
+            List<Map<String, String>> resultsListExpected = new ArrayList<Map<String, String>>();
+            Map<String, String> resultsCucumber;
 
-            for (int e = 1; e < expectedResults.getGherkinRows().size(); e++) {
-                resultsCucumber = new HashMap<String, Object>();
+            for (int e = 1; e < expectedResults.cells().size(); e++) {
+                resultsCucumber = new HashMap<String, String>();
 
-                for (int i = 0; i < expectedResults.getGherkinRows().get(0).getCells().size(); i++) {
-                    resultsCucumber.put(expectedResults.getGherkinRows().get(0).getCells().get(i), expectedResults.getGherkinRows().get(e).getCells().get(i));
+                for (int i = 0; i < expectedResults.cells().get(0).size(); i++) {
+                    resultsCucumber.put(expectedResults.cells().get(0).get(i), expectedResults.cells().get(e).get(i));
 
                 }
                 resultsListExpected.add(resultsCucumber);
@@ -1385,45 +1551,77 @@ public class CommonG {
 
             getLogger().debug("Obtained Results: " + getCSVResults().toString());
 
-            //Comparisons
-            int occurrencesObtained = 0;
-            int iterations = 0;
-            int occurrencesExpected = 0;
-            String nextKey;
-            for (int e = 0; e < resultsListExpected.size(); e++) {
-                iterations = 0;
-                occurrencesObtained = 0;
-                occurrencesExpected = Integer.parseInt(resultsListExpected.get(e).get("occurrences").toString());
-
-                List<Map<String, String>> results = getCSVResults();
-                for (Map<String, String> result : results) {
-                    Iterator<String> it = resultsListExpected.get(0).keySet().iterator();
-
-                    while (it.hasNext()) {
-                        nextKey = it.next();
-                        if (!nextKey.equals("occurrences")) {
-                            if (result.get(nextKey).toString().equals(resultsListExpected.get(e).get(nextKey).toString())) {
-                                iterations++;
-                            }
+            //First, we check that the number of rows are equals
+            assertThat(resultsListExpected.size()).overridingErrorMessage("The number of rows of expected result is %s but the csv file contains %s", resultsListExpected.size(), getCSVResults().size()).isEqualTo(getCSVResults().size());
+            //Then we check the CSV content
+            for (int i = 0; i < resultsListExpected.size(); i++) {
+                Map<String, String> expectedRow = resultsListExpected.get(i);
+                Map<String, String> obtainedRow = getCSVResults().get(i);
+                //First we check the number of columns
+                assertThat(expectedRow.size()).overridingErrorMessage("The number columns of row %s has to be %s but was %s", i, expectedRow.size(), obtainedRow.size()).isEqualTo(obtainedRow.size());
+                //Check the headers values
+                assertThat(expectedRow.keySet()).overridingErrorMessage("The headers do not match").isEqualTo(obtainedRow.keySet());
+                //Now, we are going to check the values
+                Set<String> keys = expectedRow.keySet();
+                for (String key : keys) {
+                    if (expectedRow.get(key).contains("regex") || expectedRow.get(key).contains("not_check") || expectedRow.get(key).contains("not_empty")) {
+                        if (expectedRow.get(key).contains("regex-timestamp")) {
+                            String[] format = expectedRow.get(key).split("_");
+                            assertThat(true).overridingErrorMessage("The values of key %s and %s line are not a valid timestamp", expectedRow.get(key), i).isEqualTo(isThisDateValid(obtainedRow.get(key), format[1]));
                         }
-
-                        if (iterations == resultsListExpected.get(0).keySet().size() - 1) {
-                            occurrencesObtained++;
-                            iterations = 0;
+                        if (expectedRow.get(key).contains("regex-uuid")) {
+                            assertThat(true).overridingErrorMessage("The values of key %s and %s line are not an UIDD", expectedRow.get(key), i).isEqualTo(isUUID(obtainedRow.get(key)));
                         }
+                        if (expectedRow.get(key).contains("not_empty")) {
+                            assertThat(false).overridingErrorMessage("The values of key %s and %s line are empty", expectedRow.get(key), i).isEqualTo(obtainedRow.get(key).isEmpty());
+                        }
+                    } else {
+                        assertThat(expectedRow.get(key)).overridingErrorMessage("The values of key %s and %s line are not equals", expectedRow.get(key), i).isEqualTo(obtainedRow.get(key));
                     }
-                    iterations = 0;
                 }
-
-                assertThat(occurrencesExpected).overridingErrorMessage("In row " + e + " have been found "
-                        + occurrencesObtained + " results and " + occurrencesExpected + " were expected").isEqualTo(occurrencesObtained);
             }
-
         } else {
             throw new Exception("You must execute a query before trying to get results");
         }
     }
 
+    /**
+     * Check if a string is a UUID
+     *
+     * @param uuid - UUID value
+     * @return true if it is a UUID or false if it is not an UUID
+     */
+    private boolean isUUID(String uuid) {
+        try {
+            UUID.fromString(uuid);
+            return true;
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    /**
+     * Check is a String is a valid timestamp format
+     *
+     * @param dateToValidate
+     * @param dateFromat
+     * @return true/false
+     */
+    private boolean isThisDateValid(String dateToValidate, String dateFromat) {
+        if (dateToValidate == null) {
+            return false;
+        }
+        SimpleDateFormat sdf = new SimpleDateFormat(dateFromat);
+        sdf.setLenient(false);
+        try {
+            //if not valid, it will throw ParseException
+            Date date = sdf.parse(dateToValidate);
+        } catch (ParseException e) {
+            e.printStackTrace();
+            return false;
+        }
+        return true;
+    }
 
     /**
      * Checks the different results of a previous query to Cassandra database
@@ -1463,11 +1661,11 @@ public class CommonG {
             List<Map<String, Object>> resultsListExpected = new ArrayList<Map<String, Object>>();
             Map<String, Object> resultsCucumber;
 
-            for (int e = 1; e < expectedResults.getGherkinRows().size(); e++) {
+            for (int e = 1; e < expectedResults.cells().size(); e++) {
                 resultsCucumber = new HashMap<String, Object>();
 
-                for (int i = 0; i < expectedResults.getGherkinRows().get(0).getCells().size(); i++) {
-                    resultsCucumber.put(expectedResults.getGherkinRows().get(0).getCells().get(i), expectedResults.getGherkinRows().get(e).getCells().get(i));
+                for (int i = 0; i < expectedResults.cells().get(0).size(); i++) {
+                    resultsCucumber.put(expectedResults.cells().get(0).get(i), expectedResults.cells().get(e).get(i));
 
                 }
                 resultsListExpected.add(resultsCucumber);
@@ -1536,11 +1734,11 @@ public class CommonG {
             List<Map<String, Object>> resultsListExpected = new ArrayList<Map<String, Object>>();
             Map<String, Object> resultsCucumber;
 
-            for (int e = 1; e < expectedResults.getGherkinRows().size(); e++) {
+            for (int e = 1; e < expectedResults.cells().size(); e++) {
                 resultsCucumber = new HashMap<String, Object>();
 
-                for (int i = 0; i < expectedResults.getGherkinRows().get(0).getCells().size(); i++) {
-                    resultsCucumber.put(expectedResults.getGherkinRows().get(0).getCells().get(i), expectedResults.getGherkinRows().get(e).getCells().get(i));
+                for (int i = 0; i < expectedResults.cells().get(0).size(); i++) {
+                    resultsCucumber.put(expectedResults.cells().get(0).get(i), expectedResults.cells().get(e).get(i));
 
                 }
                 resultsListExpected.add(resultsCucumber);
@@ -1618,7 +1816,7 @@ public class CommonG {
      */
     public void resultsMustBeElasticsearch(DataTable expectedResults) throws Exception {
         if (getElasticsearchResults() != null) {
-            List<List<String>> expectedResultList = expectedResults.raw();
+            List<List<String>> expectedResultList = expectedResults.cells();
             //Check size
             assertThat(expectedResultList.size() - 1).overridingErrorMessage(
                     "Expected number of columns to be" + (expectedResultList.size() - 1)
@@ -1662,9 +1860,12 @@ public class CommonG {
 
         BufferedReader input = new BufferedReader(new InputStreamReader(p.getInputStream()));
         while ((line = input.readLine()) != null) {
-            result += line;
+            if (result.isEmpty()) {
+                result += line;
+            } else {
+                result += "\n" + line;
+            }
         }
-
         input.close();
         this.commandResult = result;
         this.commandExitStatus = p.exitValue();
@@ -1879,7 +2080,11 @@ public class CommonG {
     }
 
     public String updateMarathonJson(String json) {
-        return removeJSONPathElement(removeJSONPathElement(removeJSONPathElement(json, ".versionInfo"), ".version"), ".uris.*");
+        if (json.contains("uris")) {
+            return removeJSONPathElement(removeJSONPathElement(removeJSONPathElement(json, "$.versionInfo"), "$.version"), "$.uris.*");
+        } else {
+            return removeJSONPathElement(removeJSONPathElement(json, "$.versionInfo"), "$.version");
+        }
     }
 
     public void runCommandLoggerAndEnvVar(int exitStatus, String envVar, Boolean local) {
@@ -1945,7 +2150,7 @@ public class CommonG {
 
     /**
      * Method to convert one json to yaml file - backup&restore functionality
-     *
+     * <p>
      * File will be placed on path /target/test-classes
      */
     public String asYaml(String jsonStringFile) throws JsonProcessingException, IOException, FileNotFoundException {
@@ -1987,4 +2192,293 @@ public class CommonG {
         return jsonAsYaml;
     }
 
+    /**
+     * Connect to JDBC secured/not secured database
+     *
+     * @param database database connection string
+     * @param host     database host
+     * @param port     database port
+     * @param user     database user
+     * @param password database password
+     * @param ca       trusted certificate authorities (.crt)
+     * @param crt:     server certificate
+     * @param key:     server private key
+     * @throws Exception exception     *
+     */
+    public void connectToPostgreSQLDatabase(String encryption, String database, String host, String port, String user, String
+            password, Boolean secure, String ca, String crt, String key) throws SQLException {
+        Properties props = new Properties();
+        if (port.startsWith("[")) {
+            port = port.substring(1, port.length() - 1);
+        }
+        if (user != null) {
+            props.setProperty("user", user);
+        }
+        if (!secure) {
+            if (password != null) {
+                props.setProperty("password", password);
+            } else {
+                props.setProperty("password", "stratio");
+            }
+            if (encryption != null) {
+                props.setProperty("ssl", "true");
+                props.setProperty("sslmode", "prefer");
+            }
+        } else {
+            if (user != null) {
+                props.setProperty("user", user);
+            }
+            if (ca != null) {
+                props.setProperty("sslrootcert", ca);
+            }
+            if (crt != null) {
+                props.setProperty("sslcert", crt);
+            }
+            if (key != null) {
+                props.setProperty("sslkey", key);
+            }
+            props.setProperty("password", "null");
+            props.setProperty("ssl", "true");
+            props.setProperty("sslmode", "verify-full");
+        }
+        try {
+            myConnection = DriverManager.getConnection("jdbc:postgresql://" + host + ":" + port + "/" + database, props);
+        } catch (SQLException se) {
+            // log the exception
+            this.getLogger().error(se.getMessage());
+            // re-throw the exception
+            throw se;
+        }
+    }
+
+    /*
+     * @return connection object
+     *
+     */
+    public Connection getConnection() {
+        return this.myConnection;
+    }
+
+
+    /**
+     * Generate deployment json from schema
+     *
+     * @param schema schema obtained from deploy-api
+     * @return JSONObject   deployment json
+     */
+    public JSONObject parseJSONSchema(JSONObject schema) throws Exception {
+        JSONObject json = new JSONObject();
+        String name = "";
+        JSONObject properties = schema;
+
+        // Check if key 'properties' exists
+        if (schema.has("properties")) {
+            // Obtain properties
+            properties = schema.getJSONObject("properties");
+        }
+
+        // Obtain all keys and iterate through them
+        Iterator<?> keys = properties.keys();
+        while (keys.hasNext()) {
+            // Obtain key
+            String key = keys.next().toString();
+            // Obtain value of key
+            JSONObject element = properties.getJSONObject(key);
+            // Check if value contain properties
+            // If it DOESN'T CONTAIN properties
+            if (!element.has("properties")) {
+                // Check if it has default value
+                if (element.has("default")) {
+                    // Add element with the default value assigned
+                    json.put(key, element.get("default"));
+                    // If it doesn't have default value, we assign a default value depending on the type
+                } else {
+                    switch (element.getString("type")) {
+                        case "string":
+                            json.put(key, "");
+                            break;
+                        case "boolean":
+                            json.put(key, false);
+                            break;
+                        case "number":
+                        case "integer":
+                            json.put(key, 0);
+                            break;
+                        default:
+                            Assertions.fail("type not expected");
+                    }
+                }
+                // If it CONTAINS properties
+            } else {
+                // Recursive call, keep evaluating json
+                json.put(key, parseJSONSchema(element));
+            }
+        }
+
+        return json;
+    }
+
+    /**
+     * Check json matches schema
+     *
+     * @param schema schema obtained from deploy-api
+     * @param json   json to be checked
+     * @return boolean whether the json matches the schema or not
+     */
+    public boolean matchJsonToSchema(JSONObject schema, JSONObject json) throws Exception {
+        SchemaLoader.builder()
+                .useDefaults(true)
+                .schemaJson(schema)
+                .build()
+                .load()
+                .build()
+                .validate(json);
+        return true;
+    }
+
+    /**
+     * Get service status
+     *
+     * @param service name of the service to be checked
+     * @param cluster URI of the cluster
+     * @return String   normalized service status
+     * @throws Exception exception     *
+     */
+    public String retrieveServiceStatus(String service, String cluster) throws Exception {
+        String status = "";
+        String endPoint = "/service/deploy-api/deploy/status/service?service=" + service;
+        String element = "$.status";
+        Future response;
+
+        this.setRestProtocol("https://");
+        this.setRestHost(cluster);
+        this.setRestPort(":443");
+
+        response = this.generateRequest("GET", true, null, null, endPoint, null, "json");
+        this.setResponse("GET", (Response) response.get());
+        assertThat(this.getResponse().getStatusCode()).as("It hasn't been possible to obtain status for service: " + service).isEqualTo(200);
+
+        String json = this.getResponse().getResponse();
+
+        String value = this.getJSONPathString(json, element, null);
+
+        switch (value) {
+            case "0":
+                status = "deploying";
+                break;
+            case "1":
+                status = "suspended";
+                break;
+            case "2":
+                status = "running";
+                break;
+            case "3":
+                status = "delayed";
+                break;
+            default:
+                throw new Exception("Unknown service status code");
+        }
+
+        return status;
+    }
+
+    /**
+     * Get service health status
+     *
+     * @param service name of the service to be checked
+     * @param cluster URI of the cluster
+     * @return String   normalized service health status
+     * @throws Exception exception     *
+     */
+    public String retrieveHealthServiceStatus(String service, String cluster) throws Exception {
+        String health = "";
+        String endPoint = "/service/deploy-api/deploy/status/service?service=" + service;
+        String element = "$.healthy";
+        Future response;
+
+        this.setRestProtocol("https://");
+        this.setRestHost(cluster);
+        this.setRestPort(":443");
+
+        response = this.generateRequest("GET", true, null, null, endPoint, null, "json");
+        this.setResponse("GET", (Response) response.get());
+        assertThat(this.getResponse().getStatusCode()).as("It hasn't been possible to obtain health status for service: " + service).isEqualTo(200);
+
+        String json = this.getResponse().getResponse();
+
+        String value = this.getJSONPathString(json, element, null);
+
+        switch (value) {
+            case "0":
+                health = "unhealthy";
+                break;
+            case "1":
+                health = "healthy";
+                break;
+            case "2":
+                health = "unknown";
+                break;
+            default:
+                throw new Exception("Unknown service health status code");
+        }
+
+        return health;
+    }
+
+    /**
+     * Executes the command specified in remote system
+     *
+     * @param command    command to be run locally
+     * @param exitStatus command exit status
+     * @param envVar     environment variable name
+     * @throws Exception exception
+     **/
+    public void executeCommand(String command, Integer exitStatus, String envVar) throws Exception {
+        if (exitStatus == null) {
+            exitStatus = 0;
+        }
+
+        command = "set -o pipefail && alias grep='grep --color=never' && " + command;
+        getRemoteSSHConnection().runCommand(command);
+        setCommandResult(getRemoteSSHConnection().getResult());
+        setCommandExitStatus(getRemoteSSHConnection().getExitStatus());
+        runCommandLoggerAndEnvVar(exitStatus, envVar, Boolean.FALSE);
+
+        Assertions.assertThat(getRemoteSSHConnection().getExitStatus()).isEqualTo(exitStatus);
+    }
+
+    public void connectToCrossdataDatabase(boolean security, String host, String port, String keystore_path, String keystore_pwd, String truststore_path, String trustore_pwd, String user, String password, boolean pagination) throws Exception {
+        String jdbcConnection = "jdbc:crossdata://Server=" + host + ":" + port + ";UID=" + user + ";PAGINATION=" + pagination;
+
+        if (security) {
+            Assert.assertNotNull(keystore_path, "Keystore path is mandatory when security is enabled");
+            Assert.assertNotNull(keystore_pwd, "Keystore password is mandatory when security is enabled");
+            Assert.assertNotNull(truststore_path, "Truststore path is mandatory when security is enabled");
+            Assert.assertNotNull(trustore_pwd, "Truststore password is mandatory when security is enabled");
+            jdbcConnection = jdbcConnection + ";SSL=true;KEYSTORE=" + keystore_path +
+                    ";KEYSTORE_PWD=" + keystore_pwd + ";TRUSTSTORE=" + truststore_path + ";TRUSTSTORE_PWD=" + trustore_pwd;
+        }
+
+        if (password != null) {
+            jdbcConnection = jdbcConnection + ";PWD=" + password;
+        }
+
+        try {
+            Class.forName("com.stratio.jdbc.core.jdbc4.StratioDriver");
+            myConnection = DriverManager.getConnection(jdbcConnection);
+        } catch (SQLException se) {
+            // log the exception
+            this.getLogger().error(se.getMessage());
+            // re-throw the exception
+            throw se;
+        }
+    }
+
+    public Map<String, List<String>> getPreviousSqlResult() {
+        return previousSqlResult;
+    }
+
+    public void setPreviousSqlResult(Map<String, List<String>> previousSqlResult) {
+        this.previousSqlResult = previousSqlResult;
+    }
 }

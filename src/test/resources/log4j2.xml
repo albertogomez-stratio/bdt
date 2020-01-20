@@ -54,6 +54,8 @@
         <logger name="org.elasticsearch.client.transport" level="OFF"/>
         <logger name="com.ning.http.client.AsyncHttpClientAsyncHttpClient" level="ERROR"/>
         <logger name="org.ldaptive" level="ERROR"/>
+        <logger name="com.stratio.crossdata.driver.actor" level="OFF"/>
+        <logger name="akka" level="WARN"/>
 
     </Loggers>
 </Configuration>

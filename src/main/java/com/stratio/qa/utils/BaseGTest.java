@@ -16,6 +16,9 @@
 
 package com.stratio.qa.utils;
 
+import com.stratio.qa.cucumber.testng.CucumberFeatureWrapper;
+import com.stratio.qa.cucumber.testng.CucumberRunner;
+import com.stratio.qa.cucumber.testng.PickleEventWrapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testng.ITestContext;
@@ -26,6 +29,10 @@ import java.lang.reflect.Method;
 public abstract class BaseGTest {
 
     private final Logger logger = LoggerFactory.getLogger(this.getClass().getCanonicalName());
+
+    protected CucumberRunner cucumberRunner;
+
+    protected String browser = "";
 
     /**
      * Method executed before a suite.
@@ -52,8 +59,22 @@ public abstract class BaseGTest {
      * @param context
      */
     @BeforeClass(alwaysRun = true)
-    public void beforeGClass(ITestContext context) {
+    public void beforeGClass(ITestContext context) throws Exception {
         ThreadProperty.set("class", this.getClass().getCanonicalName());
+        cucumberRunner = new CucumberRunner(this.getClass());
+    }
+
+    /**
+     * Returns two dimensional array of PickleEventWrapper scenarios with their associated CucumberFeatureWrapper feature.
+     *
+     * @return a two dimensional array of scenarios features.
+     */
+    @DataProvider
+    public Object[][] scenarios() {
+        if (cucumberRunner == null) {
+            return new Object[0][0];
+        }
+        return cucumberRunner.provideScenarios();
     }
 
     /**
@@ -63,6 +84,7 @@ public abstract class BaseGTest {
      */
     @BeforeMethod(alwaysRun = true)
     public void beforeGMethod(Method method) {
+        ThreadProperty.set("browser", this.browser);
     }
 
     /**
@@ -77,7 +99,22 @@ public abstract class BaseGTest {
     /**
      * Method executed before a class.
      */
-    @AfterClass()
+    @AfterClass(alwaysRun = true)
     public void afterGClass() {
+        if (cucumberRunner == null) {
+            return;
+        }
+        cucumberRunner.finish();
+    }
+
+    /**
+     * Run scenario
+     *
+     * @param pickleWrapper Wrapper to obtain scenario name
+     * @param featureWrapper Wrapper to obtain feature name
+     * @throws Throwable
+     */
+    public void runScenario(PickleEventWrapper pickleWrapper, CucumberFeatureWrapper featureWrapper) throws Throwable {
+        cucumberRunner.runScenario(pickleWrapper.getPickleEvent());
     }
 }

@@ -15,13 +15,14 @@
  */
 package com.stratio.qa.aspects;
 
-import com.stratio.qa.exceptions.NonReplaceableException;
-import com.stratio.qa.utils.ThreadProperty;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatExceptionOfType;
+
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.testng.annotations.Test;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatExceptionOfType;
+import com.stratio.qa.exceptions.NonReplaceableException;
+import com.stratio.qa.utils.ThreadProperty;
 
 public class ReplacementAspectTest {
 
@@ -75,6 +76,8 @@ public class ReplacementAspectTest {
         ProceedingJoinPoint pjp = null;
         System.setProperty("STRATIOBDD_ENV4", "33");
         System.setProperty("STRATIOBDD_ENV5", "aA");
+        ThreadProperty.set("STRATIOBDD_ENV6", "44");
+        ThreadProperty.set("STRATIOBDD_ENV7", "cC");
 
         assertThat(repAspect.replacedElement("${STRATIOBDD_ENV4}", pjp)).isEqualTo("33");
         assertThat(repAspect.replacedElement("${STRATIOBDD_ENV5.toLower}", pjp)).isEqualTo("aa");
@@ -82,7 +85,15 @@ public class ReplacementAspectTest {
         assertThat(repAspect.replacedElement("${STRATIOBDD_ENV5}", pjp)).isEqualTo("aA");
         assertThat(repAspect.replacedElement("${STRATIOBDD_ENV4}${STRATIOBDD_ENV5}", pjp)).isEqualTo("33aA");
         assertThat(repAspect.replacedElement("${STRATIOBDD_ENV4}:${STRATIOBDD_ENV5}", pjp)).isEqualTo("33:aA");
+
+        assertThat(repAspect.replacedElement("!{STRATIOBDD_ENV6}", pjp)).isEqualTo("44");
+        assertThat(repAspect.replacedElement("!{STRATIOBDD_ENV7}", pjp)).isEqualTo("cC");
+        assertThat(repAspect.replacedElement("!{STRATIOBDD_ENV6}!{STRATIOBDD_ENV7}", pjp)).isEqualTo("44cC");
+        assertThat(repAspect.replacedElement("!{STRATIOBDD_ENV6}:!{STRATIOBDD_ENV7}", pjp)).isEqualTo("44:cC");
+
+        assertThat(repAspect.replacedElement("@{JSON.schemas/simple1.json}", pjp)).isEqualTo("{\"a\":true}");
     }
+
     @Test
     public void replaceReflectionPlaceholderCaseTest() throws NonReplaceableException {
         ThreadProperty.set("class", this.getClass().getCanonicalName());
@@ -137,5 +148,8 @@ public class ReplacementAspectTest {
         assertThat(repAspect.replaceEnvironmentPlaceholders("${STRATIOBDD_ENV1}${STRATIOBDD_ENV2:-bb}${STRATIOBDD_ENV3.toUpper:-aa}", pjp)).as("Unexpected replacement").isEqualTo("aabbCC");
         assertThat(repAspect.replaceEnvironmentPlaceholders("${STRATIOBDD_ENV1}${STRATIOBDD_ENV2:-bb.bb}${STRATIOBDD_ENV3:-aa}", pjp)).as("Unexpected replacement").isEqualTo("aabb.bbcc");
         assertThat(repAspect.replaceEnvironmentPlaceholders("${STRATIOBDD_ENV1}${STRATIOBDD_ENV2:-bb}${STRATIOBDD_ENV3:-aa.aa}", pjp)).as("Unexpected replacement").isEqualTo("aabbcc");
+        assertThat(repAspect.replaceEnvironmentPlaceholders("${STRATIOBDD_ENV2:-\"\"}", pjp)).as("Unexpected replacement").isEqualTo("");
+        assertThat(repAspect.replaceEnvironmentPlaceholders("${STRATIOBDD_ENV2:-{}}", pjp)).as("Unexpected replacement").isEqualTo("{}");
+        assertThat(repAspect.replaceEnvironmentPlaceholders("${STRATIOBDD_ENV2:-[]}", pjp)).as("Unexpected replacement").isEqualTo("[]");
     }
 }

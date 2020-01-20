@@ -15,20 +15,28 @@
  */
 package com.stratio.qa.ATests;
 
-
-import com.stratio.qa.cucumber.testng.CucumberRunner;
+import com.stratio.qa.cucumber.testng.CucumberFeatureWrapper;
+import com.stratio.qa.cucumber.testng.PickleEventWrapper;
+import com.stratio.qa.data.BrowsersDataProvider;
 import com.stratio.qa.utils.BaseGTest;
 import cucumber.api.CucumberOptions;
+import org.testng.annotations.Factory;
 import org.testng.annotations.Test;
 
-@CucumberOptions(format = "json:target/cucumber.json", features = {
+@CucumberOptions(plugin = "json:target/cucumber.json", features = {
         "src/test/resources/features/loopTag.feature",
+        "src/test/resources/features/progloopTag.feature",
         "src/test/resources/features/multiloopTag.feature"
 })
 public class LoopTagAspectIT extends BaseGTest {
 
-    @Test
-    public void loopTagTest() throws Exception {
-        new CucumberRunner(this.getClass()).runCukes();
+    @Factory(enabled = false, dataProviderClass = BrowsersDataProvider.class, dataProvider = "availableUniqueBrowsers")
+    public LoopTagAspectIT(String browser) {
+        this.browser = browser;
+    }
+
+    @Test(dataProvider = "scenarios")
+    public void run(PickleEventWrapper pickleWrapper, CucumberFeatureWrapper featureWrapper) throws Throwable {
+        runScenario(pickleWrapper, featureWrapper);
     }
 }

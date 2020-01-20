@@ -19,8 +19,9 @@ package com.stratio.qa.specs;
 import com.ning.http.client.AsyncHttpClient;
 import com.ning.http.client.AsyncHttpClientConfig;
 import com.stratio.qa.exceptions.SuppressableException;
-import com.stratio.qa.utils.CukesGHooks;
+import com.stratio.qa.utils.StepException;
 import com.stratio.qa.utils.ThreadProperty;
+import cucumber.api.Result;
 import cucumber.api.Scenario;
 import cucumber.api.java.After;
 import cucumber.api.java.Before;
@@ -58,9 +59,11 @@ public class HookGSpec extends BaseGSpec {
 
     public static final int SCRIPT_TIMEOUT = 30;
 
-    private static final String TAG = "@important";
+    private static final String importantTAG = "@important";
 
-    private static final String customTAG = "@notimportant";
+    private static final String notImportantTAG = "@notimportant";
+
+    private static final String alwaysTAG = "@always";
 
     private static boolean prevScenarioFailed = false;
 
@@ -83,34 +86,42 @@ public class HookGSpec extends BaseGSpec {
     @Before(order = 0)
     public void globalSetup() {
         commonspec.getExceptions().clear();
+        StepException.INSTANCE.setException(null);
     }
 
 
     @After
     public void watch_this_tagged_scenario(Scenario scenario) throws Exception {
+        loggerEnabled = true;
         if (quietasdefault.equals("false")) {
-            if (!isTaggedAsNotImportant(scenario)) {
+            if (!isTagIncludedInScenario(scenario, notImportantTAG)) {
                 boolean isFailed = scenario.isFailed();
                 if (isFailed) {
                     prevScenarioFailed = isFailed;
-                    loggerEnabled = false;
                 }
             }
         } else {
-            if (isTagged(scenario)) {
+            if (isTagIncludedInScenario(scenario, importantTAG)) {
                 boolean isFailed = scenario.isFailed();
                 if (isFailed) {
-                    loggerEnabled = false;
                     prevScenarioFailed = isFailed;
                 }
             }
+        }
+        if (prevScenarioFailed) {
+            loggerEnabled = false;
         }
     }
 
     @Before
     public void quit_if_tagged_scenario_failed(Scenario scenario) throws Throwable {
         if (prevScenarioFailed) {
-            throw new SuppressableException("An important scenario has failed! TESTS EXECUTION ABORTED!", true);
+            if (!isTagIncludedInScenario(scenario, alwaysTAG)) {
+                commonspec.getLogger().warn("An important scenario has failed! TESTS EXECUTION ABORTED!");
+                throw new SuppressableException("An important scenario has failed! TESTS EXECUTION ABORTED!", true);
+            } else {
+                loggerEnabled = true;
+            }
         }
     }
 
@@ -119,23 +130,27 @@ public class HookGSpec extends BaseGSpec {
      *
      * @throws MalformedURLException
      */
-    @Before(order = ORDER_10, value = {"@mobile,@web"})
+    @Before(order = ORDER_10, value = {"@mobile or @web"})
     public void seleniumSetup() throws MalformedURLException {
         String grid = System.getProperty("SELENIUM_GRID");
-        if (grid == null) {
-            fail("Selenium grid not available");
-        }
         String b = ThreadProperty.get("browser");
         if ("".equals(b)) {
-            fail("Non available browsers");
+            fail("Non available browsers. Is it BrowsersDataProvider added in your test?");
         }
 
         DesiredCapabilities capabilities = null;
+        String browser;
+        String version;
 
-        String browser = b.split("_")[0];
-        String version = b.split("_")[1];
-        commonspec.setBrowserName(browser);
-        commonspec.getLogger().debug("Setting up selenium for {}", browser);
+        if (grid != null) {
+            browser = b.split("_")[0];
+            version = b.split("_")[1];
+            commonspec.setBrowserName(browser);
+            commonspec.getLogger().debug("Setting up selenium for {}", browser);
+        } else {
+            browser = "chrome";
+            version = "";
+        }
 
         String headers = System.getProperty("PROXY_HEADERS");
         switch (browser.toLowerCase()) {
@@ -178,7 +193,7 @@ public class HookGSpec extends BaseGSpec {
 
         capabilities.setVersion(version);
 
-        grid = "http://" + grid + "/wd/hub";
+        grid = "http://" + (grid != null ? grid : b + ":4444") + "/wd/hub";
         HttpClient.Factory factory = new ApacheHttpClient.Factory(new HttpClientFactory(60000, 60000));
         HttpCommandExecutor executor = new HttpCommandExecutor(new HashMap<String, CommandInfo>(), new URL(grid), factory);
         commonspec.setDriver(new RemoteWebDriver(executor, capabilities));
@@ -218,7 +233,7 @@ public class HookGSpec extends BaseGSpec {
     /**
      * Close selenium web driver.
      */
-    @After(order = ORDER_20, value = {"@mobile,@web"})
+    @After(order = ORDER_20, value = {"@mobile or @web"})
     public void seleniumTeardown() {
         if (commonspec.getDriver() != null) {
             commonspec.getLogger().debug("Shutdown Selenium client");
@@ -232,6 +247,15 @@ public class HookGSpec extends BaseGSpec {
      */
     @After(order = 0)
     public void teardown() {
+    }
+
+    @After
+    public void afterScenario(Scenario scenario) throws Throwable {
+        if (scenario.getStatus() == Result.Type.UNDEFINED) {
+            if (!commonspec.getExceptions().isEmpty()) {
+                scenario.write(commonspec.getExceptions().get(commonspec.getExceptions().size() - 1).toString());
+            }
+        }
     }
 
     @Before(order = 10, value = "@rest")
@@ -256,12 +280,7 @@ public class HookGSpec extends BaseGSpec {
         }
     }
 
-    private boolean isTagged(Scenario scenario) {
-        Collection<String> tags = scenario.getSourceTagNames();
-        return tags.contains(TAG);
-    }
-
-    private boolean isTaggedAsNotImportant(Scenario scenario) {
+    private boolean isTagIncludedInScenario(Scenario scenario, String customTAG) {
         Collection<String> tags = scenario.getSourceTagNames();
         return tags.contains(customTAG);
     }

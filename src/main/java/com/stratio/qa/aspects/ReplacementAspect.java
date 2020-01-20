@@ -16,14 +16,29 @@
 
 package com.stratio.qa.aspects;
 
+import com.stratio.qa.cucumber.runner.Glue;
 import com.stratio.qa.cucumber.testng.CucumberReporter;
+import com.stratio.qa.cucumber.testng.TestSourcesModelUtil;
 import com.stratio.qa.exceptions.NonReplaceableException;
 import com.stratio.qa.specs.CommonG;
+import com.stratio.qa.specs.HookGSpec;
+import com.stratio.qa.utils.ExceptionList;
+import com.stratio.qa.utils.StepException;
 import com.stratio.qa.utils.ThreadProperty;
-import gherkin.I18n;
-import gherkin.formatter.Reporter;
-import gherkin.formatter.model.*;
+import cucumber.api.PickleStepTestStep;
+import cucumber.api.Result.Type;
+import cucumber.api.Scenario;
+import cucumber.runner.AmbiguousStepDefinitionsException;
+import cucumber.runner.EventBus;
+import cucumber.runtime.Backend;
+import cucumber.runtime.CucumberException;
+import cucumber.runtime.RuntimeOptions;
+import cucumber.runtime.StepDefinitionMatch;
+import gherkin.events.PickleEvent;
+import gherkin.pickles.*;
+import gherkin.pickles.Argument;
 import org.aspectj.lang.JoinPoint;
+import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,32 +48,73 @@ import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Enumeration;
 import java.util.List;
+
+import org.aspectj.lang.annotation.After;
+import org.aspectj.lang.annotation.Aspect;
+import org.aspectj.lang.annotation.Before;
+import org.aspectj.lang.annotation.Pointcut;
 
 @Aspect
 public class ReplacementAspect {
 
     private final Logger logger = LoggerFactory.getLogger(this.getClass().getCanonicalName());
 
+    private Glue glue;
+
+    private List<String> undefinedSteps = new ArrayList<>();
+
     private String lastEchoedStep = "";
 
-
-    @Pointcut("(execution (gherkin.formatter.model.Scenario.new(..)) ||  execution (gherkin.formatter.model.ScenarioOutline.new(..))) && "
-            + "args (comments, tags, keyword, name, description, line, id) ")
-    protected void replacementScenarios(List<Comment> comments, List<Tag> tags, String keyword, String name, String description, Integer line, String id) {
+    @Pointcut("execution (cucumber.runner.Runner.new(..)) && "
+            + "args (bus, backends, runtimeOptions)")
+    protected void runnerInit(EventBus bus, Collection<? extends Backend> backends, RuntimeOptions runtimeOptions) {
     }
 
-    @After(value = "replacementScenarios(comments, tags, keyword, name, description, line, id)")
-    public void aroundScenarios(JoinPoint jp, List<Comment> comments, List<Tag> tags, String keyword, String name, String description, Integer line, String id) throws Throwable {
+    @After(value = "runnerInit(bus, backends, runtimeOptions)")
+    public void runnerInitGlue(JoinPoint jp, EventBus bus, Collection<? extends Backend> backends, RuntimeOptions runtimeOptions) throws Throwable {
+        glue = new Glue(bus);
+        for (Backend backend : backends) {
+            backend.loadGlue(glue, runtimeOptions.getGlue());
+        }
+    }
 
-        BasicStatement scenario = (BasicStatement) jp.getThis();
-        String scenarioName = scenario.getName();
-        String newScenarioName = replacedElement(scenarioName, jp);
+    @Pointcut("execution (* cucumber.runtime.formatter.DefaultSummaryPrinter.printSnippets(..))")
+    protected void print() {
+    }
 
-        if (!scenarioName.equals(newScenarioName)) {
+    @Around(value = "print()")
+    public void printSnippets(ProceedingJoinPoint pjp) throws Throwable {
+        if (!undefinedSteps.isEmpty()) {
+            logger.error("The following steps are undefined:");
+            for (String undefinedStep:undefinedSteps) {
+                logger.error("    {}", undefinedStep);
+            }
+        }
+    }
+
+    @Pointcut("execution (* cucumber.runner.Runner.runPickle(..)) && "
+            + "args (pickle)")
+    protected void replacementScenarios(PickleEvent pickle) {
+    }
+
+    @Before(value = "replacementScenarios(pickle)")
+    public void aroundScenarios(JoinPoint jp, PickleEvent pickle) throws Throwable {
+        String scenarioName = pickle.pickle.getName();
+        String newScenarioName;
+        try {
+            newScenarioName = replacedElement(scenarioName, jp);
+        } catch (Exception e) {
+            ExceptionList.INSTANCE.getExceptions().add(e);
+            newScenarioName = scenarioName + " | Placeholder not replaced -- " + e.toString();
+        }
+        if (!newScenarioName.equals(pickle.pickle.getName())) {
+            Pickle pickle1 = pickle.pickle;
             Field field = null;
-            Class current = scenario.getClass();
+            Class current = pickle1.getClass();
             do {
                 try {
                     field = current.getDeclaredField("name");
@@ -66,51 +122,121 @@ public class ReplacementAspect {
             } while ((current = current.getSuperclass()) != null);
 
             field.setAccessible(true);
-            field.set(scenario, replacedElement(name, jp));
+            field.set(pickle1, newScenarioName);
         }
     }
 
-    @Pointcut("execution (public void cucumber.runtime.Runtime.runStep(..)) && "
-            + "args (featurePath, step, reporter, i18n)")
-    protected void replacementStar(String featurePath, Step step, Reporter reporter, I18n i18n) {
+    @Pointcut("execution (* cucumber.runner.TestStep.executeStep(..)) && "
+            + "args (scenario, skipSteps)")
+    protected void replacementStar(Scenario scenario, boolean skipSteps) {
     }
 
-    @Before(value = "replacementStar(featurePath, step, reporter, i18n)")
-    public void aroundReplacementStar(JoinPoint jp, String featurePath, Step step, Reporter reporter, I18n i18n) throws Throwable {
-        DocString docString = step.getDocString();
-        List<DataTableRow> rows = step.getRows();
-        if (docString != null) {
-            String value = replacedElement(docString.getValue(), jp);
-            Field field = docString.getClass().getField("value");
-            field.set(field, value);
-        }
-        if (rows != null) {
-            for (int r = 0; r < rows.size(); r++) {
-                List<String> cells = rows.get(r).getCells();
-                for (int c = 0; c < cells.size(); c++) {
-                    cells.set(c, replacedElement(cells.get(c), jp));
+    @Around(value = "replacementStar(scenario, skipSteps)")
+    public Type aroundReplacementStar(ProceedingJoinPoint pjp, Scenario scenario, boolean skipSteps) throws Throwable {
+        if (pjp.getTarget() instanceof PickleStepTestStep) {
+            if (StepException.INSTANCE.getException() != null) {
+                return Type.SKIPPED;
+            } else {
+                if (scenario.getSourceTagNames().contains("@error")) {
+                    for (String tag: scenario.getSourceTagNames()) {
+                        if (tag.contains("errorMessage")) {
+                            String msg = tag.substring((tag.lastIndexOf("(") + 1), (tag.length()) - 1).replaceAll("__", " ");
+                            logger.error("-> " + msg);
+                            throw new CucumberException(msg);
+                        }
+                    }
+                }
+                try {
+                    PickleStepTestStep pickleTestStep = (PickleStepTestStep) pjp.getTarget();
+                    PickleStep step = pickleTestStep.getPickleStep();
+
+                    // Replace elements in datatable
+                    StringBuilder sbDataTable = new StringBuilder();
+                    List<Argument> argumentList = new ArrayList<>(step.getArgument());
+                    for (int a = 0; a < argumentList.size(); a++) {
+                        if (argumentList.get(a) instanceof PickleTable) {
+                            PickleTable pickleTable = (PickleTable) argumentList.get(a);
+                            List<PickleRow> pickleRowList = new ArrayList<>(pickleTable.getRows());
+                            for (int r = 0; r < pickleRowList.size(); r++) {
+                                PickleRow pickleRow = pickleRowList.get(r);
+                                List<PickleCell> pickleCellList = new ArrayList<>(pickleRow.getCells());
+                                sbDataTable.append("| ");
+                                for (int c = 0; c < pickleCellList.size(); c++) {
+                                    PickleCell pickleCell = pickleCellList.get(c);
+                                    pickleCellList.set(c, new PickleCell(pickleCell.getLocation(), replacedElement(pickleCell.getValue(), pjp)));
+                                    sbDataTable.append(pickleCellList.get(c).getValue()).append(" | ");
+                                }
+                                pickleRowList.set(r, new PickleRow(pickleCellList));
+                                sbDataTable.append("\n");
+                            }
+                            pickleTable = new PickleTable(pickleRowList);
+                            argumentList.set(a, pickleTable);
+                        }
+                    }
+
+                    // Set new datatable in PickleStep object
+                    step = new PickleStep(step.getText(), argumentList, step.getLocations());
+
+                    // Replace elements in step
+                    String uri = pickleTestStep.getStepLocation().split(":")[0];
+                    String stepName = step.getText();
+                    String newName = replacedElement(stepName, pjp);
+                    String keyword = TestSourcesModelUtil.INSTANCE.getTestSourcesModel().getKeywordFromSource(scenario.getUri(), pickleTestStep.getStepLine());
+                    if (!stepName.equals(newName)) {
+                        //field up to BasicStatement, from Step and ExampleStep
+                        Field field = null;
+                        Class current = step.getClass();
+                        do {
+                            try {
+                                field = current.getDeclaredField("text");
+                            } catch (Exception e) {
+                            }
+                        } while ((current = current.getSuperclass()) != null);
+
+                        field.setAccessible(true);
+                        field.set(step, newName.replaceAll("(\\r|\\n|\\r\\n)+", "\\\\n"));
+                        scenario.write(newName);
+                    }
+                    step = new PickleStep(step.getText(), argumentList, step.getLocations());
+
+                    TestSourcesModelUtil.INSTANCE.getTestSourcesModel().addReplacedStep(scenario.getUri(), pickleTestStep.getStepLine(), step);
+                    lastEchoedStep = pickleTestStep.getStepText();
+                    if (HookGSpec.loggerEnabled) {
+                        logger.info("   {}{}", keyword, newName);
+                        if (!sbDataTable.toString().isEmpty()) {
+                            logger.info("  {}", sbDataTable.toString());
+                        }
+                    }
+
+                    // Run step
+                    try {
+                        StepDefinitionMatch definitionMatch = glue.stepDefinitionMatch(uri, step);
+                        if (definitionMatch != null) {
+                            if (!skipSteps) {
+                                definitionMatch.runStep(scenario);
+                                return Type.PASSED;
+                            } else {
+                                definitionMatch.dryRunStep(scenario);
+                                return Type.SKIPPED;
+                            }
+                        } else {
+                            logger.error("Undefined step!! {}", newName);
+                            String undefinedStep = scenario.getUri() + " # " + newName;
+                            if (!undefinedSteps.contains(undefinedStep)) {
+                                undefinedSteps.add(undefinedStep);
+                            }
+                            return Type.UNDEFINED;
+                        }
+                    } catch (AmbiguousStepDefinitionsException asde) {
+                        return (Type) pjp.proceed();
+                    }
+                } catch (Exception e) {
+                    StepException.INSTANCE.setException(e);
+                    throw e;
                 }
             }
         }
-
-        String stepName = step.getName();
-        String newName = replacedElement(stepName, jp);
-        if (!stepName.equals(newName)) {
-            //field up to BasicStatement, from Step and ExampleStep
-            Field field = null;
-            Class current = step.getClass();
-            do {
-                try {
-                    field = current.getDeclaredField("name");
-                } catch (Exception e) { }
-            } while ((current = current.getSuperclass()) != null);
-
-            field.setAccessible(true);
-            field.set(step, newName);
-        }
-
-        lastEchoedStep = step.getName();
-        logger.info("  {}{}", step.getKeyword(), step.getName());
+        return (Type) pjp.proceed();
     }
 
     protected String replacedElement(String el, JoinPoint jp) throws NonReplaceableException {
@@ -253,9 +379,14 @@ public class ReplacementAspect {
             String defaultValue = "";
             String prop;
             String placeholderAux = "";
+            Boolean emptyDefault = false;
 
             if (placeholder.contains(":-")) {
                 defaultValue = placeholder.substring(placeholder.indexOf(":-") + 2, placeholder.length() - 1);
+                if ("''".equals(defaultValue)) {
+                    emptyDefault = true;
+                    defaultValue = "";
+                }
                 placeholderAux = placeholder.substring(0, placeholder.indexOf(":-")) + "}";
             }
 
@@ -268,7 +399,7 @@ public class ReplacementAspect {
                     modifier = placeholder.substring(placeholder.indexOf(".") + 1, placeholder.length() - 1);
                 }
             } else {
-                if (defaultValue.isEmpty()) {
+                if (defaultValue.isEmpty() && !emptyDefault) {
                     if (placeholder.contains(".")) {
                         modifier = placeholder.substring(placeholder.indexOf(".") + 1, placeholder.length() - 1);
                         sysProp = placeholder.substring(2, placeholder.indexOf("."));
@@ -281,7 +412,12 @@ public class ReplacementAspect {
             }
 
             if (defaultValue.isEmpty()) {
-                prop = System.getProperty(sysProp);
+                if (emptyDefault) {
+                    prop = System.getProperty(sysProp, defaultValue);
+                } else {
+                    prop = System.getProperty(sysProp);
+                }
+
             } else {
                 prop = System.getProperty(sysProp, defaultValue);
             }
@@ -301,6 +437,10 @@ public class ReplacementAspect {
             newVal = newVal.replace(placeholder, prop);
         }
 
+        // Allow setting empty string as default value
+        if (newVal.equalsIgnoreCase("\"\"")) {
+            newVal = "";
+        }
         return newVal;
     }
 }

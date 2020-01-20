@@ -41,8 +41,7 @@ public class LoopIncludeTagAspect {
 
     private final Logger logger = LoggerFactory.getLogger(this.getClass().getCanonicalName());
 
-
-    @Pointcut("execution (private * cucumber.runtime.FeatureBuilder.read(..)) &&" + "args (resource)")
+    @Pointcut("execution (private * cucumber.runtime.model.FeatureParser.read(..)) &&" + "args (resource)")
     protected void featureBuilderRead(Resource resource) {
     }
 
@@ -53,15 +52,67 @@ public class LoopIncludeTagAspect {
      */
     @Around(value = "featureBuilderRead(resource)")
     public String aroundAddLoopTagPointcutScenario(Resource resource) throws Throwable {
-        List<String> lines = Files.readAllLines(Paths.get(resource.getPath()), StandardCharsets.UTF_8);
+        List<String> lines = Files.readAllLines(Paths.get(resource.getPath().getRawSchemeSpecificPart()), StandardCharsets.UTF_8);
         String listParams;
         String paramReplace;
-        String path = resource.getPath();
+        String path = resource.getPath().getRawSchemeSpecificPart();
         int endIndex = path.lastIndexOf("/") + 1;
         path = path.substring(0, endIndex);
+        boolean skipReplacement = false;
 
 
         for (int s = 0; s < lines.size(); s++) {
+            if (lines.get(s).toUpperCase().matches("\\s*@PROGLOOP.*")) {
+                String[] elems = new String[0];
+                String elem = "";
+                int times = 0;
+                listParams = lines.get(s).substring((lines.get(s).lastIndexOf("(") + 1), (lines.get(s).length()) - 1).split(",")[0];
+
+                elem = System.getProperty(listParams);
+
+                if (elem == null) {
+                    lines.set(s, "@error @errorMessage(Variable__" + listParams + "__is__not__defined.)");
+                } else {
+                    try {
+                        times = Integer.parseInt(elem);
+                    } catch (Exception ex) {
+                        lines.set(s, "@error @errorMessage(Variable__" + listParams + "__is__not__an__integer.)");
+                        skipReplacement = true;
+                    }
+
+                    if (!skipReplacement && times < 1) {
+                        lines.set(s, "@error @errorMessage(Variable__" + listParams + "__must__be__higher__than__0.)");
+                        skipReplacement = true;
+                    } else {
+                        elems = new String[times];
+                    }
+
+                    if (!skipReplacement) {
+                        for (Integer i = 1; i <= times; i++) {
+                            elems[i - 1] = i.toString();
+                        }
+
+                        paramReplace = lines.get(s).substring((lines.get(s).lastIndexOf("(") + 1), (lines.get(s).length()) - 1).split(",")[1];
+
+                        lines.set(s, " ");
+
+                        while (!(lines.get(s).toUpperCase().contains("SCENARIO:"))) {
+                            s++;
+                        }
+                        lines.set(s, lines.get(s).replaceAll("Scenario", "Scenario Outline"));
+                        s++;
+                        while (s < lines.size()) {
+                            if ((lines.get(s).toUpperCase().contains("SCENARIO")) || lines.get(s).matches("^\\s[^\\n|\\r]@.*")) {
+                                break;
+                            }
+                            s++;
+                        }
+                        lines.add(s, "Examples:");
+                        exampleLoopLines(paramReplace, elems, lines, s + 1);
+                        s = s + elems.length;
+                    }
+                }
+            }
             if (lines.get(s).toUpperCase().matches("\\s*@MULTILOOP.*")) {
                 Map<String, String[]> params = new HashMap<>();
                 String[] elements = lines.get(s).substring((lines.get(s).lastIndexOf("(") + 1), (lines.get(s).length()) - 1).split(",");
@@ -70,56 +121,65 @@ public class LoopIncludeTagAspect {
                     String listParam = elementParts[0];
                     String paramName = elementParts[1];
                     String[] elems;
-                    try {
-                        elems = System.getProperty(listParam).split(",");
-                    } catch (Exception e) {
-                        logger.debug("-> {} is not defined. Exception captured till scenario execution.", listParam);
-                        elems = "error,error".split(",");
+
+                    if (System.getProperty(listParam) == null) {
+                        lines.set(s, "@error @errorMessage(Variable__" + listParam + "__is__not__defined.)");
+                        skipReplacement = true;
+                        break;
                     }
+
+                    elems = System.getProperty(listParam).split(",");
                     params.put(paramName, elems);
                 }
 
-                lines.set(s, " ");
-                while (!(lines.get(s).toUpperCase().contains("SCENARIO:"))) {
-                    s++;
-                }
-                lines.set(s, lines.get(s).replaceAll("Scenario", "Scenario Outline"));
-                s++;
-                while (s < lines.size()) {
-                    if ((lines.get(s).toUpperCase().contains("SCENARIO")) || lines.get(s).matches(".*@[^\\{].*")) {
-                        break;
+                if (!skipReplacement) {
+                    lines.set(s, " ");
+
+                    while (!(lines.get(s).toUpperCase().contains("SCENARIO:"))) {
+                        s++;
                     }
+                    lines.set(s, lines.get(s).replaceAll("Scenario", "Scenario Outline"));
                     s++;
+                    while (s < lines.size()) {
+                        if ((lines.get(s).toUpperCase().contains("SCENARIO")) || lines.get(s).matches("^\\s[^\\n|\\r]@.*")) {
+                            break;
+                        }
+                        s++;
+                    }
+                    lines.add(s, "Examples:");
+                    int deltaLines = exampleMultiloopLines(params, lines, s + 1);
+                    s = s + deltaLines;
                 }
-                lines.add(s, "Examples:");
-                int deltaLines = exampleMultiloopLines(params, lines,  s + 1);
-                s = s + deltaLines;
             }
             if (lines.get(s).toUpperCase().matches("\\s*@LOOP.*")) {
-                String[] elems;
+                String[] elems = new String[0];
                 listParams = lines.get(s).substring((lines.get(s).lastIndexOf("(") + 1), (lines.get(s).length()) - 1).split(",")[0];
                 try {
                     elems = System.getProperty(listParams).split(",");
                 } catch (Exception e) {
-                    logger.debug("-> {} is not defined. Exception captured till scenario execution.", listParams);
-                    elems = "error,error".split(",");
+                    lines.set(s, "@error @errorMessage(Variable__" + listParams + "__is__not__defined.)");
+                    skipReplacement = true;
                 }
-                paramReplace = lines.get(s).substring((lines.get(s).lastIndexOf("(") + 1), (lines.get(s).length()) - 1).split(",")[1];
-                lines.set(s, " ");
-                while (!(lines.get(s).toUpperCase().contains("SCENARIO:"))) {
-                    s++;
-                }
-                lines.set(s, lines.get(s).replaceAll("Scenario", "Scenario Outline"));
-                s++;
-                while (s < lines.size()) {
-                    if ((lines.get(s).toUpperCase().contains("SCENARIO")) || lines.get(s).matches(".*@[^\\{].*")) {
-                        break;
+                if (!skipReplacement) {
+                    paramReplace = lines.get(s).substring((lines.get(s).lastIndexOf("(") + 1), (lines.get(s).length()) - 1).split(",")[1];
+
+                    lines.set(s, " ");
+
+                    while (!(lines.get(s).toUpperCase().contains("SCENARIO:"))) {
+                        s++;
                     }
+                    lines.set(s, lines.get(s).replaceAll("Scenario", "Scenario Outline"));
                     s++;
+                    while (s < lines.size()) {
+                        if ((lines.get(s).toUpperCase().contains("SCENARIO")) || lines.get(s).matches("^\\s[^\\n|\\r]@.*")) {
+                            break;
+                        }
+                        s++;
+                    }
+                    lines.add(s, "Examples:");
+                    exampleLoopLines(paramReplace, elems, lines, s + 1);
+                    s = s + elems.length;
                 }
-                lines.add(s, "Examples:");
-                exampleLoopLines(paramReplace, elems, lines,  s + 1);
-                s = s + elems.length;
             }
             if (lines.get(s).toUpperCase().matches("\\s*@BACKGROUND.*")) {
                 listParams = lines.get(s).substring((lines.get(s).lastIndexOf("(") + 1), (lines.get(s).length()) - 1);
@@ -131,7 +191,7 @@ public class LoopIncludeTagAspect {
                     lines.remove(s--);
                 } else {
                     lines.remove(s);
-                    while (!lines.get(s).toUpperCase().contains("SCENARIO") && !lines.get(s).matches(".*@[^\\{].*") && !lines.get(s).toUpperCase().contains("/BACKGROUND")) {
+                    while (!lines.get(s).toUpperCase().contains("SCENARIO") && !lines.get(s).matches("^\\s[^\\n|\\r]@.*") && !lines.get(s).toUpperCase().contains("/BACKGROUND")) {
                         lines.remove(s);
                     }
                     if (lines.get(s).toUpperCase().contains("@/BACKGROUND")) {
@@ -139,12 +199,13 @@ public class LoopIncludeTagAspect {
                     }
                 }
             }
+            skipReplacement = false;
         }
         parseLines(lines, path);
         return String.join("\n", lines);
     }
 
-    public void exampleLoopLines (String name, String[] params, List<String> lines, int num) {
+    public void exampleLoopLines(String name, String[] params, List<String> lines, int num) {
         lines.add(num, "| " + name + " | " + name + ".id |");
         for (int i = 0; i < params.length; i++) {
             num++;
@@ -152,7 +213,7 @@ public class LoopIncludeTagAspect {
         }
     }
 
-    public int exampleMultiloopLines (Map<String, String[]> params, List<String> lines, int num) {
+    public int exampleMultiloopLines(Map<String, String[]> params, List<String> lines, int num) {
         int numLines = 0;
         String[] keys = params.keySet().toArray(new String[params.keySet().size()]);
         StringBuilder sbHeader = new StringBuilder();
@@ -245,7 +306,13 @@ public class LoopIncludeTagAspect {
                     if ((lines.get(lineAfterInclude).toUpperCase().contains("SCENARIO:") || lines.get(lineAfterInclude).toUpperCase().contains("OUTLINE:")) && !lines.get(lineAfterInclude).toUpperCase().contains("@INCLUDE")) {
                         lines.set(lineOriginalFeature, lines.get(lineAfterInclude));
                         lines.set(lineAfterInclude, lineToinclude);
-                        lineToinclude = "";
+                        lineToinclude = lines.get(lineOriginalFeature);
+                        for (int lineAux = lineOriginalFeature + 1; lineAux < lineAfterInclude; lineAux++) {
+                            if (lines.get(lineAux).matches("\\s*@[^{].+")) {
+                                lines.set(lineAux - 1, lines.get(lineAux));
+                                lines.set(lineAux, lineToinclude);
+                            }
+                        }
                         break;
                     }
                 }
@@ -271,7 +338,7 @@ public class LoopIncludeTagAspect {
     public String getScenName(String s) {
 
         String scenName = s.substring((s.lastIndexOf("scenario:") + "scenario:".length()));
-        if (s.contains("params")) {
+        if (s.contains("params:")) {
             scenName = scenName.substring(0, scenName.indexOf(","));
         } else {
             scenName = scenName.substring(0, scenName.indexOf(")"));
@@ -282,7 +349,7 @@ public class LoopIncludeTagAspect {
 
     public String[] getParams(String s) {
         String[] vals = null;
-        if (s.contains("params")) {
+        if (s.contains("params:")) {
             String[] pairs = s.substring((s.lastIndexOf("[") + 1), (s.length()) - 2).split(",");
             vals = new String[(pairs.length) * 2];
             int index = 0;
@@ -335,7 +402,7 @@ public class LoopIncludeTagAspect {
                             }
                         }
                     } else if (!sCurrentLine.toUpperCase().contains("OUTLINE") && sCurrentLine.toUpperCase().contains("SCENARIO:")) {
-                        while ((sCurrentLine = bufferedFeature.readLine()) != null && !sCurrentLine.toUpperCase().contains("SCENARIO:") && !sCurrentLine.toUpperCase().contains("EXAMPLES:")) {
+                        while ((sCurrentLine = bufferedFeature.readLine()) != null && !sCurrentLine.toUpperCase().contains("SCENARIO:") && !sCurrentLine.toUpperCase().contains("EXAMPLES:") && !sCurrentLine.matches("\\s*@[^{].+")) {
                             parsedFeature = parsedFeature + sCurrentLine + "\n";
                         }
                     }

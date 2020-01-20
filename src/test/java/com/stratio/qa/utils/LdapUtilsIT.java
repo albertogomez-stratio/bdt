@@ -36,7 +36,7 @@ public class LdapUtilsIT {
     @BeforeMethod
     public void setTestSettings(){
         this.ldapUtils = new LdapUtils();
-        this.ldapUtils.connect();
+        this.ldapUtils.connect("");
     }
 
     @Test

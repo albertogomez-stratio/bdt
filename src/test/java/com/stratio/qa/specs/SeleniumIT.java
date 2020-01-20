@@ -15,28 +15,28 @@
  */
 package com.stratio.qa.specs;
 
-import com.stratio.qa.cucumber.testng.CucumberRunner;
-import com.stratio.qa.utils.BaseTest;
+import com.stratio.qa.cucumber.testng.CucumberFeatureWrapper;
+import com.stratio.qa.cucumber.testng.PickleEventWrapper;
+import com.stratio.qa.utils.BaseGTest;
 import cucumber.api.CucumberOptions;
 import org.testng.annotations.Test;
 import org.testng.annotations.Factory;
 import com.stratio.qa.data.BrowsersDataProvider;
 
-@CucumberOptions(format = "json:target/cucumber.json", features ={
+@CucumberOptions(plugin = "json:target/cucumber.json", features ={
         "src/test/resources/features/readWebElementTextToVariable.feature",
-        "src/test/resources/features/assertCommandExistsOnTimeOutIT.feature",
         "src/test/resources/features/assertSeleniumNElementExistsIT.feature",
         "src/test/resources/features/assertSeleniumNElementExistsOnTimeOutIT.feature"
 })
-public class ThenGIT extends BaseTest {
+public class SeleniumIT extends BaseGTest {
 
     @Factory(enabled = false, dataProviderClass = BrowsersDataProvider.class, dataProvider = "availableUniqueBrowsers")
-    public ThenGIT(String browser) {
+    public SeleniumIT(String browser) {
         this.browser = browser;
     }
 
-    @Test
-    public void thenGTest() throws Exception {
-        new CucumberRunner(this.getClass()).runCukes();
+    @Test(dataProvider = "scenarios")
+    public void run(PickleEventWrapper pickleWrapper, CucumberFeatureWrapper featureWrapper) throws Throwable {
+        runScenario(pickleWrapper, featureWrapper);
     }
 }

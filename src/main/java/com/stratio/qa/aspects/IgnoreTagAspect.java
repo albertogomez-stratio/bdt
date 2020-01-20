@@ -16,12 +16,11 @@
 
 package com.stratio.qa.aspects;
 
-import cucumber.runtime.Runtime;
-import cucumber.runtime.model.CucumberScenario;
-import gherkin.formatter.Formatter;
-import gherkin.formatter.Reporter;
-import gherkin.formatter.model.Scenario;
-import gherkin.formatter.model.Tag;
+import com.auth0.jwt.internal.org.apache.commons.codec.binary.Base64;
+import com.stratio.qa.specs.CommonG;
+import cucumber.runner.Runner;
+import gherkin.events.PickleEvent;
+import gherkin.pickles.PickleTag;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -32,87 +31,84 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
-
-import static com.stratio.qa.aspects.IgnoreTagAspect.ignoreReasons.*;
 
 @Aspect
 public class IgnoreTagAspect {
 
     private final Logger logger = LoggerFactory.getLogger(this.getClass().getCanonicalName());
 
-    @Pointcut("execution (* cucumber.runtime.model.CucumberScenario.run(..)) && "
-            + "args (formatter, reporter, runtime)")
-    protected void addIgnoreTagPointcutScenario(Formatter formatter, Reporter reporter, Runtime runtime) {
+    @Pointcut("execution (* cucumber.runner.Runner.runPickle(..)) && "
+            + "args (pickle)")
+    protected void addIgnoreTagPointcutScenario(PickleEvent pickle) {
     }
 
     /**
-     * @param pjp ProceedingJoinPoint
-     * @param formatter formatter
-     * @param reporter reporter
-     * @param runtime runtime
+     * @param pjp    ProceedingJoinPoint
+     * @param pickle pickle
      * @throws Throwable exception
      */
-    @Around(value = "addIgnoreTagPointcutScenario(formatter, reporter, runtime)")
-    public void aroundAddIgnoreTagPointcut(ProceedingJoinPoint pjp, Formatter formatter, Reporter reporter,
-                                           Runtime runtime) throws Throwable {
+    @Around(value = "addIgnoreTagPointcutScenario(pickle)")
+    public void aroundAddIgnoreTagPointcut(ProceedingJoinPoint pjp, PickleEvent pickle) throws Throwable {
+        Runner runner = (Runner) pjp.getThis();
 
-        CucumberScenario scen = (CucumberScenario) pjp.getThis();
-        Scenario scenario = (Scenario) scen.getGherkinModel();
-
-        Class<?> sc = scen.getClass();
-        Method tt = sc.getSuperclass().getDeclaredMethod("tagsAndInheritedTags");
+        Class<?> sc = runner.getClass();
+        Method tt = sc.getDeclaredMethod("buildBackendWorlds");
         tt.setAccessible(true);
-        Set<Tag> tags = (Set<Tag>) tt.invoke(scen);
+        tt.invoke(runner);
 
+        String scenarioName = pickle.pickle.getName();
+        List<PickleTag> pickleTagList = pickle.pickle.getTags();
         List<String> tagList = new ArrayList<>();
-        String scenarioName = scenario.getName();
-        tagList = tags.stream().map(Tag::getName).collect(Collectors.toList());
-
-        ignoreReasons exitReason = manageTags(tagList, scenarioName);
-        if (exitReason.equals(NOREASON)) {
-            logger.error("Scenario '" + scenario.getName() + "' failed due to wrong use of the @ignore tag. ");
+        for (PickleTag pt : pickleTagList) {
+            tagList.add(pt.getName());
         }
 
-        if ((!(exitReason.equals(NOTIGNORED))) && (!(exitReason.equals(NOREASON)))) {
-            runtime.buildBackendWorlds(reporter, tags, scenario.getName());
-            formatter.startOfScenarioLifeCycle(scenario);
-            formatter.endOfScenarioLifeCycle(scenario);
-            runtime.disposeBackendWorlds();
+        ignoreReasons exitReason = manageTags(tagList, scenarioName);
+        if (exitReason.equals(ignoreReasons.NOREASON)) {
+            logger.error("Scenario '" + scenarioName + "' failed due to wrong use of the @ignore tag.");
+        }
+
+        if ((!(exitReason.equals(ignoreReasons.NOTIGNORED))) && (!(exitReason.equals(ignoreReasons.NOREASON)))) {
+            tt = sc.getDeclaredMethod("disposeBackendWorlds");
+            tt.setAccessible(true);
+            tt.invoke(runner);
         } else {
             pjp.proceed();
         }
     }
 
     public ignoreReasons manageTags(List<String> tagList, String scenarioName) {
-        ignoreReasons exit = NOTIGNORED;
+        ignoreReasons exit = ignoreReasons.NOTIGNORED;
         if (tagList.contains("@ignore")) {
             exit = ignoreReasons.NOREASON;
-            for (String tag: tagList) {
+            for (String tag : tagList) {
                 Pattern pattern = Pattern.compile("@tillfixed\\((.*?)\\)");
                 Matcher matcher = pattern.matcher(tag);
                 if (matcher.find()) {
                     String ticket = matcher.group(1);
-                    logger.warn("Scenario '" + scenarioName + "' ignored because of ticket: " + ticket);
-                    exit = ignoreReasons.JIRATICKET;
+                    if (!isJiraTicketFixed(ticket)) {
+                        logger.warn("Scenario '" + scenarioName + "' ignored because of ticket: " + ticket + "\n");
+                        exit = ignoreReasons.JIRATICKET;
+                    } else {
+                        return ignoreReasons.NOTIGNORED;
+                    }
                 }
             }
             if (tagList.contains("@envCondition")) {
                 exit = ignoreReasons.ENVCONDITION;
             }
             if (tagList.contains("@unimplemented")) {
-                logger.warn("Scenario '" + scenarioName + "' ignored because it is not yet implemented.");
+                logger.warn("Scenario '" + scenarioName + "' ignored because it is not yet implemented.\n");
                 exit = ignoreReasons.UNIMPLEMENTED;
             }
             if (tagList.contains("@manual")) {
-                logger.warn("Scenario '" + scenarioName + "' ignored because it is marked as manual test.");
+                logger.warn("Scenario '" + scenarioName + "' ignored because it is marked as manual test.\n");
                 exit = ignoreReasons.MANUAL;
             }
             if (tagList.contains("@toocomplex")) {
-                logger.warn("Scenario '" + scenarioName + "' ignored because the test is too complex.");
+                logger.warn("Scenario '" + scenarioName + "' ignored because the test is too complex.\n");
                 exit = ignoreReasons.TOOCOMPLEX;
             }
         }
@@ -120,4 +116,35 @@ public class IgnoreTagAspect {
     }
 
     public enum ignoreReasons { NOTIGNORED, ENVCONDITION, UNIMPLEMENTED, MANUAL, TOOCOMPLEX, JIRATICKET, NOREASON }
+
+    /**
+     * Checks the passed by ticket parameter validity against a Attlasian Jira account
+     *
+     * @param ticket Jira ticket
+     */
+    private boolean isJiraTicketFixed(String ticket) {
+        String userJira = System.getProperty("usernamejira") != null ? System.getProperty("usernamejira") : System.getenv("usernamejira");
+        String passJira = System.getProperty("passwordjira") != null ? System.getProperty("passwordjira") : System.getenv("passwordjira");
+        Boolean isJiraTicketFixed = false;
+
+        if ((userJira != null) || (passJira != null) || "".equals(ticket)) {
+            CommonG comm = new CommonG();
+            String authString = userJira + ":" + passJira;
+            byte[] authEncBytes = Base64.encodeBase64(authString.getBytes());
+            String value = "";
+            try {
+                comm.runLocalCommand("curl -X GET https://stratio.atlassian.net/rest/api/2/issue/" + ticket + " -H 'Authorization: Basic " + new String(authEncBytes) + "' | jq -r '.fields.status.name'");
+                value = comm.getCommandResult().toLowerCase();
+            } catch (Exception e) {
+                logger.error("Rest API Jira connection error", e);
+                return false;
+            }
+
+            if ("done".equals(value) || "finalizado".equals(value) || "qa".equals(value)) {
+                isJiraTicketFixed = true;
+                logger.debug("Jira ticket has status {}, so scenario is not ignored", value);
+            }
+        }
+        return isJiraTicketFixed;
+    }
 }

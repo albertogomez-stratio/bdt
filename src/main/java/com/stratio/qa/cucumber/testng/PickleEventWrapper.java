@@ -14,20 +14,17 @@
  * limitations under the License.
  */
 
-package com.stratio.qa.cucumber.converter;
+package com.stratio.qa.cucumber.testng;
 
-import cucumber.api.Transformer;
+import gherkin.events.PickleEvent;
 
-public class NullableIntegerConverter extends Transformer<Integer> {
+/**
+ * The only purpose of this interface is to be able to provide a custom
+ * <pre>toString()</pre>, making TestNG reports look more descriptive.
+ *
+ */
+public interface PickleEventWrapper {
 
-    @Override
-    public Integer transform(String input) {
+    PickleEvent getPickleEvent();
 
-        if ("//NULL//".equals(input) || "".equals(input)) {
-            return null;
-        } else {
-            return Integer.parseInt(input);
-        }
-
-    }
 }

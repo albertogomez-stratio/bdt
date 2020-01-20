@@ -27,15 +27,20 @@ import javax.net.ssl.*;
 import org.apache.http.*;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
+import org.apache.http.client.config.CookieSpecs;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.protocol.HttpClientContext;
+import org.apache.http.conn.ssl.NoopHostnameVerifier;
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
+import org.apache.http.conn.ssl.TrustSelfSignedStrategy;
 import org.apache.http.cookie.Cookie;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.impl.client.LaxRedirectStrategy;
 import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.ssl.SSLContexts;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.select.Elements;
@@ -49,14 +54,24 @@ public class GosecSSOUtils {
 
     public String passWord = System.getProperty("passWord", "1234");
 
+    public String tenant;
+
     public String ssoHost = System.getProperty("ssoHost", "sso.paas.labs.stratio.com");
+
+    private String governance;
 
     public String managementHost = System.getProperty("managementHost", "/service/gosecmanagement");
 
-    public GosecSSOUtils(String ssHost, String userName, String passWord) {
+    private String governanceProfileHost = System.getProperty("govProfileHost", "/service/dg-businessglossary-api/dictionary/user/profile");
+
+    private Boolean verifyHost = true;
+
+    public GosecSSOUtils(String ssHost, String userName, String passWord, String tenant, String gov) {
         this.ssoHost = ssHost;
         this.userName = userName;
         this.passWord = passWord;
+        this.tenant = tenant;
+        this.governance = gov;
     }
 
 
@@ -74,11 +89,17 @@ public class GosecSSOUtils {
         sslContext.init(null, ALL_TRUSTING_TRUST_MANAGER, new SecureRandom());
         HttpClientContext context = HttpClientContext.create();
         HttpGet httpGet = new HttpGet(protocol + ssoHost + "/login");
-        HttpClient client = HttpClientBuilder.create()
+        HttpClientBuilder clientBuilder = HttpClientBuilder.create()
                 .setSslcontext(sslContext)
                 .setRedirectStrategy(new LaxRedirectStrategy())
                 .setDefaultRequestConfig(RequestConfig.custom()
-                        .setCircularRedirectsAllowed(true).build()).build();
+                .setCookieSpec(CookieSpecs.STANDARD).setCircularRedirectsAllowed(true).build());
+        if (!this.verifyHost) {
+            SSLConnectionSocketFactory scsf = new SSLConnectionSocketFactory(SSLContexts.custom().
+                    loadTrustMaterial(null, new TrustSelfSignedStrategy()).build(), NoopHostnameVerifier.INSTANCE);
+            clientBuilder.setSSLSocketFactory(scsf);
+        }
+        HttpClient client = clientBuilder.build();
         try {
             HttpResponse firstResponse = client.execute(httpGet, context);
 
@@ -98,6 +119,11 @@ public class GosecSSOUtils {
             params.add(new BasicNameValuePair("submit", "LOGIN"));
             params.add(new BasicNameValuePair("username", userName));
             params.add(new BasicNameValuePair("password", passWord));
+
+            if (tenant != null) {
+                params.add(new BasicNameValuePair("tenant", tenant));
+            }
+
             params.add(new BasicNameValuePair("lt", loginCode));
             params.add(new BasicNameValuePair("execution", executionCode));
             HttpPost httpPost = new HttpPost(redirect);
@@ -108,15 +134,20 @@ public class GosecSSOUtils {
                 logger.debug(oneHeader.getName() + ":" + oneHeader.getValue());
             }
 
-            HttpGet managementGet = new HttpGet(protocol + ssoHost + managementHost);
-            client.execute(managementGet, context);
-
+            HttpGet getRequest;
+            if (governance != null) {
+                getRequest = new HttpGet(protocol + ssoHost + governanceProfileHost);
+            } else {
+                getRequest = new HttpGet(protocol + ssoHost + managementHost);
+            }
+            client.execute(getRequest, context);
             for (Cookie oneCookie : context.getCookieStore().getCookies()) {
                 logger.debug(oneCookie.getName() + ":" + oneCookie.getValue());
                 cookieToken.put(oneCookie.getName(), oneCookie.getValue());
             }
 
         } catch (Exception e) {
+            logger.debug(e.getMessage());
             e.getStackTrace();
         }
         return cookieToken;
@@ -144,5 +175,9 @@ public class GosecSSOUtils {
             return "";
         }
 
+    }
+
+    public void setVerifyHost(Boolean verifyHost) {
+        this.verifyHost = verifyHost;
     }
 }
