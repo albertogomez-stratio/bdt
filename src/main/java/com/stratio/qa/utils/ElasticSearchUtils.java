@@ -16,43 +16,55 @@
 
 package com.stratio.qa.utils;
 
+import org.apache.http.HttpHost;
 import org.elasticsearch.ElasticsearchException;
-import org.elasticsearch.action.admin.cluster.state.ClusterStateResponse;
-import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
-import org.elasticsearch.action.admin.indices.create.CreateIndexResponse;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest;
-import org.elasticsearch.action.admin.indices.delete.DeleteIndexResponse;
-import org.elasticsearch.action.admin.indices.exists.indices.IndicesExistsResponse;
-import org.elasticsearch.action.bulk.BulkRequestBuilder;
-import org.elasticsearch.action.index.IndexRequestBuilder;
+import org.elasticsearch.action.bulk.BulkRequest;
+import org.elasticsearch.action.bulk.BulkResponse;
+import org.elasticsearch.action.delete.DeleteRequest;
+import org.elasticsearch.action.index.IndexRequest;
+import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
-import org.elasticsearch.action.search.SearchType;
-import org.elasticsearch.client.Client;
-import org.elasticsearch.client.transport.TransportClient;
-import org.elasticsearch.cluster.metadata.IndexMetaData;
+import org.elasticsearch.client.RequestOptions;
+import org.elasticsearch.client.RestClient;
+import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.client.indices.*;
 import org.elasticsearch.cluster.metadata.MappingMetaData;
-import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.common.transport.InetSocketTransportAddress;
+import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.search.SearchHit;
+import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.net.InetAddress;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLException;
+import javax.net.ssl.TrustManagerFactory;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.security.*;
+import java.security.cert.CertificateException;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 
-public class ElasticSearchUtils {
+public class ElasticSearchUtils extends RestClient.FailureListener {
+
+    private static final Logger LOGGER = LoggerFactory
+            .getLogger(ElasticSearchUtil.class);
 
     private String es_host;
 
     private int es_native_port;
 
-    private Client client;
+    private RestHighLevelClient client;
 
     private Settings settings;
 
@@ -74,9 +86,9 @@ public class ElasticSearchUtils {
      * @param settings : LinkedHashMap with all the settings about ES connection
      */
     public void setSettings(LinkedHashMap<String, Object> settings) {
-        Settings.Builder builder = Settings.settingsBuilder();
+        Settings.Builder builder = Settings.builder();
         for (Map.Entry<String, Object> entry : settings.entrySet()) {
-            builder.put(entry.getKey(), entry.getValue());
+            builder.put(entry.getKey(), entry.getValue().toString());
         }
         this.settings = builder.build();
     }
@@ -92,11 +104,22 @@ public class ElasticSearchUtils {
     /**
      * Connect to ES.
      */
-    public void connect() throws java.net.UnknownHostException {
-        this.client = TransportClient.builder().settings(this.settings).build()
-                .addTransportAddress(new InetSocketTransportAddress(InetAddress.getByName(this.es_host),
-                        this.es_native_port));
+    public void connect(String keyStorePath, String  keyStorePassword, String  trustorePath, String trustorePassword) throws SSLException {
+
+        HttpHost httpHost = new HttpHost(this.es_host, this.es_native_port, "https");
+        SSLContext sslContext = initializeSSLContext(keyStorePath, keyStorePassword, trustorePath, trustorePassword);
+
+        this.client = new RestHighLevelClient(RestClient.builder(httpHost).setFailureListener(this).setHttpClientConfigCallback(httpClientBuilder -> httpClientBuilder.setSSLContext(sslContext)));
     }
+
+    public void connect() {
+
+        HttpHost httpHost = new HttpHost(this.es_host, this.es_native_port, "http");
+        this.client = new RestHighLevelClient(RestClient.builder(httpHost).setFailureListener(this));
+    }
+
+
+
 
 
     /**
@@ -104,7 +127,7 @@ public class ElasticSearchUtils {
      *
      * @return es client
      */
-    public Client getClient() {
+    public RestHighLevelClient getClient() {
         return this.client;
     }
 
@@ -115,10 +138,13 @@ public class ElasticSearchUtils {
      * @return true if the index has been created and false if the index has not been created.
      * @throws ElasticsearchException
      */
-    public boolean createSingleIndex(String indexName) throws
-            ElasticsearchException {
+    public boolean createSingleIndex(String indexName)  {
         CreateIndexRequest indexRequest = new CreateIndexRequest(indexName);
-        CreateIndexResponse res = this.client.admin().indices().create(indexRequest).actionGet();
+        try {
+            this.client.indices().create(indexRequest, RequestOptions.DEFAULT);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
         return indexExists(indexName);
     }
 
@@ -132,21 +158,37 @@ public class ElasticSearchUtils {
     public boolean dropSingleIndex(String indexName) throws
             ElasticsearchException {
         DeleteIndexRequest deleteIndexRequest = new DeleteIndexRequest(indexName);
-        DeleteIndexResponse res = this.client.admin().indices().delete(deleteIndexRequest).actionGet();
+        try {
+            this.client.indices().delete(deleteIndexRequest, RequestOptions.DEFAULT);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
         return indexExists(indexName);
     }
 
     public boolean dropAllIndexes() {
 
         boolean result = true;
-        ImmutableOpenMap<String, IndexMetaData> indexes = this.client.admin().cluster()
-                .prepareState()
-                .execute().actionGet()
-                .getState().getMetaData().getIndices();
 
-        for (String indexName : indexes.keys().toArray(String.class)) {
+        GetMappingsRequest request = new GetMappingsRequest();
+        GetMappingsResponse response;
+
+        try {
+            response  = client.indices().getMapping(request, RequestOptions.DEFAULT);
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+
+        Map<String, MappingMetaData> mappings = response.mappings();
+
+        for (String indexName : mappings.keySet()) {
             DeleteIndexRequest deleteIndexRequest = new DeleteIndexRequest(indexName);
-            DeleteIndexResponse res = this.client.admin().indices().delete(deleteIndexRequest).actionGet();
+            try {
+                this.client.indices().delete(deleteIndexRequest, RequestOptions.DEFAULT);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
             result = indexExists(indexName);
         }
         return result;
@@ -159,7 +201,16 @@ public class ElasticSearchUtils {
      * @return true if the index exists or false if the index does not exits.
      */
     public boolean indexExists(String indexName) {
-        return this.client.admin().indices().prepareExists(indexName).execute().actionGet().isExists();
+
+        try {
+            GetIndexRequest request = new GetIndexRequest(indexName);
+
+            return client.indices().exists(request, RequestOptions.DEFAULT);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return false;
     }
 
     /**
@@ -170,24 +221,31 @@ public class ElasticSearchUtils {
      * @param mappingSource the data that has to be inserted in the mapping.
      */
     public void createMapping(String indexName, String mappingName, ArrayList<XContentBuilder> mappingSource) {
-        IndicesExistsResponse existsResponse = this.client.admin().indices().prepareExists(indexName).execute()
-                .actionGet();
-        //If the index does not exists, it will be created without options
-        if (!existsResponse.isExists()) {
+
+
+        if (!this.indexExists(indexName)) {
             if (!createSingleIndex(indexName)) {
                 throw new ElasticsearchException("Failed to create " + indexName
                         + " index.");
             }
         }
-        BulkRequestBuilder bulkRequest = this.client.prepareBulk();
+
+        //If the index does not exists, it will be created without options
+        BulkRequest bulkRequest = new BulkRequest();
+
         for (int i = 0; i < mappingSource.size(); i++) {
             int aux = i + 1;
 
-            IndexRequestBuilder res = this.client
-                    .prepareIndex(indexName, mappingName, String.valueOf(aux)).setSource(mappingSource.get(i));
-            bulkRequest.add(res);
+            bulkRequest.add(new IndexRequest(indexName).id(String.valueOf(aux)).source(mappingSource.get(i)));
         }
-        bulkRequest.execute();
+
+        try {
+            BulkResponse bulkResponse = client.bulk(bulkRequest, RequestOptions.DEFAULT);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+
     }
 
     /**
@@ -198,17 +256,21 @@ public class ElasticSearchUtils {
      * @return true if the mapping exists and false in other case
      */
     public boolean existsMapping(String indexName, String mappingName) {
-        ClusterStateResponse resp = this.client.admin().cluster().prepareState().execute().actionGet();
 
-        if (resp.getState().getMetaData().index(indexName) == null) {
+        GetMappingsRequest request = new GetMappingsRequest();
+        GetMappingsRequest indices = request.indices(indexName);
+
+        GetMappingsResponse getMappingsResponse;
+
+        try {
+            getMappingsResponse = client.indices().getMapping(indices, RequestOptions.DEFAULT);
+        } catch (IOException e) {
+
+            e.printStackTrace();
             return false;
         }
-        ImmutableOpenMap<String, MappingMetaData> mappings = resp.getState().getMetaData().index(indexName).getMappings();
 
-        if (mappings.get(mappingName) != null) {
-            return true;
-        }
-        return false;
+        return getMappingsResponse.mappings().get(mappingName) != null;
     }
 
     /**
@@ -223,10 +285,10 @@ public class ElasticSearchUtils {
      * @throws Exception
      */
     public List<JSONObject> searchSimpleFilterElasticsearchQuery(String indexName, String mappingName, String
-            columnName,
-                                                                 Object value, String filterType) throws Exception {
+            columnName, Object value, String filterType) throws Exception {
         List<JSONObject> resultsJSON = new ArrayList<JSONObject>();
         QueryBuilder query;
+
         switch (filterType) {
             case "equals":
                 query = QueryBuilders.termQuery(columnName, value);
@@ -247,15 +309,15 @@ public class ElasticSearchUtils {
                 throw new Exception("Filter not implemented in the library");
         }
 
-        SearchResponse response = this.client.prepareSearch(indexName)
-                .setTypes(mappingName)
-                .setSearchType(SearchType.QUERY_AND_FETCH)
-                .setQuery(query)
-                .execute()
-                .actionGet();
-        ImmutableOpenMap<Object, Object> aux = response.getContext();
-        SearchHit[] results = response.getHits().getHits();
-        for (SearchHit hit : results) {
+        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(query).timeout(new TimeValue(60, TimeUnit.SECONDS));
+
+        SearchRequest searchRequest = new SearchRequest().indices(indexName).source(searchSourceBuilder);
+
+        SearchResponse searchResponse = client.search(searchRequest, RequestOptions.DEFAULT);
+
+        SearchHit[] hits = searchResponse.getHits().getHits();
+
+        for (SearchHit hit : hits) {
             resultsJSON.add(new JSONObject(hit.getSourceAsString()));
         }
         return resultsJSON;
@@ -270,9 +332,14 @@ public class ElasticSearchUtils {
      * @param document
      * @throws Exception
      */
-    public void indexDocument(String indexName, String mappingName, String id, XContentBuilder document)
-            throws Exception {
-        client.prepareIndex(indexName, mappingName, id).setSource(document).get();
+    public void indexDocument(String indexName, String mappingName, String id, XContentBuilder document) {
+
+        IndexRequest request = new IndexRequest(indexName).id(id).source(document);
+        try {
+            client.index(request, RequestOptions.DEFAULT);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     /**
@@ -283,6 +350,50 @@ public class ElasticSearchUtils {
      * @param id
      */
     public void deleteDocument(String indexName, String mappingName, String id) {
-        client.prepareDelete(indexName, mappingName, id).get();
+
+        DeleteRequest deleteRequest = new DeleteRequest(indexName, id);
+        try {
+
+            client.delete(deleteRequest, RequestOptions.DEFAULT);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static SSLContext initializeSSLContext(String keyStore, String keyStorePass, String truststore, String truststorePass) throws SSLException {
+        try {
+
+
+            Path keyStorePath = Paths.get(keyStore);
+            Path truststorePath = Paths.get(truststore);
+            LOGGER.info("Getting the keystore path which is {} also getting truststore path {}", keyStorePath, truststorePath);
+
+            SSLContext sc = SSLContext.getInstance("TLSv1.2");
+
+            KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
+            try (InputStream is = Files.newInputStream(keyStorePath)) {
+                ks.load(is, keyStorePass.toCharArray());
+            }
+
+            KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            keyManagerFactory.init(ks, keyStorePass.toCharArray());
+
+
+            KeyStore ts = KeyStore.getInstance(KeyStore.getDefaultType());
+            try (InputStream is = Files.newInputStream(truststorePath)) {
+                ts.load(is, truststorePass.toCharArray());
+            }
+
+            TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
+                    TrustManagerFactory.getDefaultAlgorithm());
+            trustManagerFactory.init(ts);
+
+            sc.init(keyManagerFactory.getKeyManagers(), trustManagerFactory.getTrustManagers(), new java.security.SecureRandom());
+            return sc;
+        } catch (KeyStoreException | IOException | CertificateException | NoSuchAlgorithmException | UnrecoverableKeyException | KeyManagementException e) {
+            throw new SSLException("Cannot initialize SSL Context ", e);
+        }
     }
 }
+

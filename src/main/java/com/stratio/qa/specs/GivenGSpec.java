@@ -40,6 +40,9 @@ import java.util.regex.Pattern;
 
 import org.apache.commons.lang3.StringUtils;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLException;
+
 import static com.stratio.qa.assertions.Assertions.assertThat;
 
 /**
@@ -95,7 +98,7 @@ public class GivenGSpec extends BaseGSpec {
      * @param url         url where is started Cassandra cluster
      */
     @Given("^I connect to '(Cassandra|Mongo|Elasticsearch)' cluster at '(.+)'$")
-    public void connect(String clusterType, String url) throws DBException, UnknownHostException {
+    public void connect(String clusterType, String url) throws DBException, UnknownHostException, SSLException {
         switch (clusterType) {
             case "Cassandra":
                 commonspec.getCassandraClient().setHost(url);
@@ -128,8 +131,12 @@ public class GivenGSpec extends BaseGSpec {
      * @throws UnknownHostException  exception
      * @throws NumberFormatException exception
      */
-    @Given("^I connect to Elasticsearch cluster at host '(.+?)'( using native port '(.+?)')?( using cluster name '(.+?)')?$")
-    public void connectToElasticSearch(String host, String foo, String nativePort, String bar, String clusterName) throws DBException, UnknownHostException, NumberFormatException {
+
+
+    @Given("^I connect to Elasticsearch cluster at host '(.+?)'( using native port '(.+?)')?( with trustStorePath '(.+?)' and trustStorePassword '(.+?)' with keyStorePath '(.+?)' and keyStorePassword '(.+?)')?( using cluster name '(.+?)')?$")
+    public void connectToElasticSearch(String host, String foo, String nativePort, String bar, String trustorePath, String trustStorePassword, String keyStorePath, String keyStorePassword, String clusterName) throws NumberFormatException, SSLException {
+//    @Given("^I connect to Elasticsearch cluster at host '(.+?)'( using native port '(.+?)')?( using cluster name '(.+?)')?$")
+//    public void connectToElasticSearch(String host, String foo, String nativePort, String bar, String clusterName) throws DBException, UnknownHostException, NumberFormatException {
         LinkedHashMap<String, Object> settings_map = new LinkedHashMap<String, Object>();
         if (clusterName != null) {
             settings_map.put("cluster.name", clusterName);
@@ -143,7 +150,12 @@ public class GivenGSpec extends BaseGSpec {
             commonspec.getElasticSearchClient().setNativePort(ES_DEFAULT_NATIVE_PORT);
         }
         commonspec.getElasticSearchClient().setHost(host);
-        commonspec.getElasticSearchClient().connect();
+
+        if (trustorePath != null && trustStorePassword != null && keyStorePath != null  && keyStorePassword != null) {
+            commonspec.getElasticSearchClient().connect(keyStorePath, keyStorePassword, trustorePath, trustStorePassword);
+        } else {
+            commonspec.getElasticSearchClient().connect();
+        }
     }
 
     /**
