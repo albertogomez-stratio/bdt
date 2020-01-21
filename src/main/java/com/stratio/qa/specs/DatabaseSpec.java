@@ -134,8 +134,6 @@ public class DatabaseSpec extends BaseGSpec {
      */
     @Given("^I connect to Elasticsearch cluster at host '(.+?)'( using native port '(.+?)')? with trustStorePath '(.+?)' and trustStorePassword '(.+?)' with keyStorePath '(.+?)' and keyStorePassword '(.+?)'( using cluster name '(.+?)')?$")
     public void connectToElasticSearch(String host, String nativePort, String trustorePath, String trustStorePassword, String keyStorePath, String keyStorePassword, String clusterName) throws NumberFormatException, SSLException {
-//    @Given("^I connect to Elasticsearch cluster at host '(.+?)'( using native port '(.+?)')?( using cluster name '(.+?)')?$")
-//    public void connectToElasticSearch(String host, String foo, String nativePort, String bar, String clusterName) throws DBException, UnknownHostException, NumberFormatException {
         LinkedHashMap<String, Object> settings_map = new LinkedHashMap<String, Object>();
         if (clusterName != null) {
             settings_map.put("cluster.name", clusterName);
@@ -458,19 +456,18 @@ public class DatabaseSpec extends BaseGSpec {
      * Execute query with filter over elasticsearch
      *
      * @param indexName
-     * @param mappingName
      * @param columnName
      * @param filterType  it could be equals, gt, gte, lt and lte.
      * @param value       value of the column to be filtered.
      */
-    @When("^I execute an elasticsearch query over index '(.*?)' and mapping '(.*?)' and column '(.*?)' with value '(.*?)' to '(.*?)'$")
-    public void elasticSearchQueryWithFilter(String indexName, String mappingName, String
+    @When("^I execute an elasticsearch query over index '(.*?)' and column '(.*?)' with value '(.*?)' to '(.*?)'$")
+    public void elasticSearchQueryWithFilter(String indexName, String
             columnName, String filterType, String value) {
         try {
             commonspec.setResultsType("elasticsearch");
             commonspec.setElasticsearchResults(
                     commonspec.getElasticSearchClient()
-                            .searchSimpleFilterElasticsearchQuery(indexName, mappingName, columnName,
+                            .searchSimpleFilterElasticsearchQuery(indexName, columnName,
                                     value, filterType)
             );
         } catch (Exception e) {
@@ -555,17 +552,16 @@ public class DatabaseSpec extends BaseGSpec {
      * Index a document within a mapping type.
      *
      * @param indexName
-     * @param mappingName
      * @param key
      * @param value
      * @throws Exception
      */
-    @When("^I index a document in the index named '(.+?)' using the mapping named '(.+?)' with key '(.+?)' and value '(.+?)'$")
-    public void indexElasticsearchDocument(String indexName, String mappingName, String key, String value) throws Exception {
+    @When("^I index a document in the index named '(.+?)' with key '(.+?)' and value '(.+?)'$")
+    public void indexElasticsearchDocument(String indexName, String key, String value) throws Exception {
         ArrayList<XContentBuilder> mappingsource = new ArrayList<XContentBuilder>();
         XContentBuilder builder = jsonBuilder().startObject().field(key, value).endObject();
         mappingsource.add(builder);
-        commonspec.getElasticSearchClient().createMapping(indexName, mappingName, mappingsource);
+        commonspec.getElasticSearchClient().createMapping(indexName, mappingsource);
     }
 
     /*
@@ -909,11 +905,10 @@ public class DatabaseSpec extends BaseGSpec {
      * @param columnName
      * @param columnValue
      */
-    @Then("^The Elasticsearch index named '(.+?)' and mapping '(.+?)' contains a column named '(.+?)' with the value '(.+?)'$")
-    public void elasticSearchIndexContainsDocument(String indexName, String mappingName, String columnName, String columnValue) throws Exception {
+    @Then("^The Elasticsearch index named '(.+?)' contains a column named '(.+?)' with the value '(.+?)'$")
+    public void elasticSearchIndexContainsDocument(String indexName, String columnName, String columnValue) throws Exception {
         Assertions.assertThat((commonspec.getElasticSearchClient().searchSimpleFilterElasticsearchQuery(
                 indexName,
-                mappingName,
                 columnName,
                 columnValue,
                 "equals"

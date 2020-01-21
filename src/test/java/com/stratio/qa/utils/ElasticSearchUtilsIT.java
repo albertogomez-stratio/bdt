@@ -92,7 +92,7 @@ public class ElasticSearchUtilsIT {
                 .field("new", false).endObject();
 
         mappingsource.add(builder);
-        es_utils.createMapping("testindex", "testmapping", mappingsource);
+        es_utils.createMapping("testindex", mappingsource);
         Thread.sleep(2000);
         assertThat(es_utils.existsMapping("testindex", "testmapping")).isTrue();
         es_utils.getClient().close();
@@ -123,12 +123,12 @@ public class ElasticSearchUtilsIT {
 
         mappingsource.add(builder);
         mappingsource.add(builder2);
-        es_utils.createMapping("testindex", "testmapping", mappingsource);
+        es_utils.createMapping("testindex", mappingsource);
         Thread.sleep(2000);
         assertThat(es_utils.existsMapping("testindex", "testmapping")).isTrue();
         int res = 0;
         try {
-            res = es_utils.searchSimpleFilterElasticsearchQuery("testindex", "testmapping", "ident", "1", "equals")
+            res = es_utils.searchSimpleFilterElasticsearchQuery("testindex", "ident", "1", "equals")
                     .size();
         } catch (Exception e) {
             e.printStackTrace();
@@ -140,7 +140,7 @@ public class ElasticSearchUtilsIT {
     }
 
     @Test
-    public void indexDocument() throws UnknownHostException, IOException {
+    public void indexDocument() throws  IOException {
         es_utils.connect();
         if (es_utils.indexExists("testindex")) {
             es_utils.dropSingleIndex("testindex");
@@ -153,9 +153,9 @@ public class ElasticSearchUtilsIT {
                 .field("money", 10.2)
                 .field("new", false).endObject();
         try {
-            es_utils.indexDocument("testindex", "testmapping", "1", document);
+            es_utils.indexDocument("testindex", "1", document);
             Thread.sleep(2000);
-            List<JSONObject> results = es_utils.searchSimpleFilterElasticsearchQuery("testindex", "testmapping",
+            List<JSONObject> results = es_utils.searchSimpleFilterElasticsearchQuery("testindex",
                     "ident", "1",
                     "equals");
             assertThat(results.size()).isEqualTo(1);
@@ -170,7 +170,7 @@ public class ElasticSearchUtilsIT {
     }
 
     @Test
-    public void deleteDocument() throws UnknownHostException, IOException {
+    public void deleteDocument() throws IOException {
         es_utils.connect();
         if (es_utils.indexExists("testindex")) {
             es_utils.dropSingleIndex("testindex");
@@ -183,15 +183,15 @@ public class ElasticSearchUtilsIT {
                 .field("money", 10.2)
                 .field("new", false).endObject();
         try {
-            es_utils.indexDocument("testindex", "testmapping", "1", document);
+            es_utils.indexDocument("testindex", "1", document);
             Thread.sleep(2000);
-            List<JSONObject> results = es_utils.searchSimpleFilterElasticsearchQuery("testindex", "testmapping",
+            List<JSONObject> results = es_utils.searchSimpleFilterElasticsearchQuery("testindex",
                     "ident", "1",
                     "equals");
             assertThat(results.size()).isEqualTo(1);
-            es_utils.deleteDocument("testindex", "testmapping", "1");
+            es_utils.deleteDocument("testindex", "1");
             Thread.sleep(2000);
-            List<JSONObject> results2 = es_utils.searchSimpleFilterElasticsearchQuery("testindex", "testmapping",
+            List<JSONObject> results2 = es_utils.searchSimpleFilterElasticsearchQuery("testindex",
                     "ident", "1",
                     "equals");
             assertThat(results2.size()).isEqualTo(0);

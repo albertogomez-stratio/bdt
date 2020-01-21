@@ -16,10 +16,13 @@
 
 package com.stratio.qa.specs;
 
+import com.jcraft.jsch.JSchException;
+import com.jcraft.jsch.Session;
 import com.stratio.qa.utils.RemoteSSHConnection;
 import com.stratio.qa.utils.ThreadProperty;
 import cucumber.api.java.en.Given;
 import cucumber.api.java.en.Then;
+import cucumber.api.java.en.When;
 import org.assertj.core.api.Assertions;
 
 import java.io.BufferedWriter;
@@ -99,15 +102,14 @@ public class CommandExecutionSpec extends BaseGSpec {
         commonspec.getRemoteSSHConnection().copyTo(localPath, remotePath);
     }
 
-
-    /**
-     * Executes the command specified in local system
-     *
-     * @param command    command to be run locally
-     * @param sExitStatus command exit status
-     * @param envVar     environment variable name
-     * @throws Exception exception
-     **/
+        /**
+         * Executes the command specified in local system
+         *
+         * @param command    command to be run locally
+         * @param sExitStatus command exit status
+         * @param envVar     environment variable name
+         * @throws Exception exception
+         **/
     @Given("^I run '(.+?)' locally( with exit status '(\\d+)')?( and save the value in environment variable '(.+?)')?$")
     public void executeLocalCommand(String command, String sExitStatus, String envVar) throws Exception {
         Integer exitStatus = sExitStatus != null ? Integer.valueOf(sExitStatus) : null;
@@ -295,6 +297,25 @@ public class CommandExecutionSpec extends BaseGSpec {
     @Then(value = "^I copy( remotely file)? '(.*?)' in '(.*?)' path in '(.*?)' nodes of my cluster with user '(.+?)' and pem '(.+?)'$")
     public void copyFileInAllnodes(String remote, String localPath, String remotePath, String nodes, String user, String pem) throws Exception {
         executeScriptInAllnodes(remote, localPath, remotePath, nodes, user, pem);
+    }
+
+    @When("^I open a ssh tunnel to '(.+?)' with user '(.+?)' using pem file '(.+?)' to host ip '(.+?)' host port '(.+?)' to local port '(.+?)'")
+    public void openSshTunnelTo(String host, String user, String pemFilePath, String tunnelHostIp, String tunnelHostPort, String tunnelLocalPort) throws JSchException {
+        commonspec.getRemoteSSHConnection().openSshTunnel(host, user, pemFilePath, tunnelHostIp, tunnelHostPort, tunnelLocalPort);
+    }
+
+    @Then ("^I close the ssh tunnel")
+    public void closeSshTunnel() {
+
+        Session session = this.commonspec.getRemoteSSHConnection().getSession();
+
+        if (session != null && session.isConnected()) {
+            session.disconnect();
+
+            if (!session.isConnected()) {
+                commonspec.getLogger().info("Shh Tunnel closed");
+            }
+        }
     }
 
     private void executeScriptInAllnodes(String remotely, String commandOrLocalPath, String remotePath, String nodes, String user, String pem) throws Exception {

@@ -57,8 +57,7 @@ import java.util.concurrent.TimeUnit;
 
 public class ElasticSearchUtils extends RestClient.FailureListener {
 
-    private static final Logger LOGGER = LoggerFactory
-            .getLogger(ElasticSearchUtil.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(ElasticSearchUtil.class);
 
     private String es_host;
 
@@ -73,7 +72,7 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
      */
     public ElasticSearchUtils() {
         this.es_host = System.getProperty("ES_NODE", "127.0.0.1");
-        this.es_native_port = Integer.valueOf(System.getProperty("ES_NATIVE_PORT", "9300"));
+        this.es_native_port = Integer.valueOf(System.getProperty("ES_NATIVE_PORT", "9200"));
     }
 
     public Settings getSettings() {
@@ -118,10 +117,6 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
         this.client = new RestHighLevelClient(RestClient.builder(httpHost).setFailureListener(this));
     }
 
-
-
-
-
     /**
      * Get ES client(Connected previously).
      *
@@ -143,7 +138,8 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
         try {
             this.client.indices().create(indexRequest, RequestOptions.DEFAULT);
         } catch (IOException e) {
-            e.printStackTrace();
+            throw new ElasticsearchException("Error creating index: " + indexName);
+
         }
         return indexExists(indexName);
     }
@@ -155,13 +151,12 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
      * @return true if the index exists
      * @throws ElasticsearchException
      */
-    public boolean dropSingleIndex(String indexName) throws
-            ElasticsearchException {
+    public boolean dropSingleIndex(String indexName) throws ElasticsearchException {
         DeleteIndexRequest deleteIndexRequest = new DeleteIndexRequest(indexName);
         try {
             this.client.indices().delete(deleteIndexRequest, RequestOptions.DEFAULT);
         } catch (IOException e) {
-            e.printStackTrace();
+            throw new ElasticsearchException("Error dropping index: " + indexName);
         }
         return indexExists(indexName);
     }
@@ -176,8 +171,8 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
         try {
             response  = client.indices().getMapping(request, RequestOptions.DEFAULT);
         } catch (IOException e) {
-            e.printStackTrace();
-            return false;
+            throw new ElasticsearchException("Error getting indices names");
+
         }
 
         Map<String, MappingMetaData> mappings = response.mappings();
@@ -187,7 +182,7 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
             try {
                 this.client.indices().delete(deleteIndexRequest, RequestOptions.DEFAULT);
             } catch (IOException e) {
-                e.printStackTrace();
+                throw new ElasticsearchException("Error deleting index: " + indexName);
             }
             result = indexExists(indexName);
         }
@@ -207,26 +202,22 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
 
             return client.indices().exists(request, RequestOptions.DEFAULT);
         } catch (IOException e) {
-            e.printStackTrace();
+            throw new ElasticsearchException("Error checking if index " + indexName + "exists");
         }
-
-        return false;
     }
 
     /**
      * Create a mapping over an index
      *
      * @param indexName
-     * @param mappingName
      * @param mappingSource the data that has to be inserted in the mapping.
      */
-    public void createMapping(String indexName, String mappingName, ArrayList<XContentBuilder> mappingSource) {
+    public void createMapping(String indexName, ArrayList<XContentBuilder> mappingSource) {
 
 
         if (!this.indexExists(indexName)) {
             if (!createSingleIndex(indexName)) {
-                throw new ElasticsearchException("Failed to create " + indexName
-                        + " index.");
+                throw new ElasticsearchException("Failed to create " + indexName + " index.");
             }
         }
 
@@ -240,12 +231,10 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
         }
 
         try {
-            BulkResponse bulkResponse = client.bulk(bulkRequest, RequestOptions.DEFAULT);
+            client.bulk(bulkRequest, RequestOptions.DEFAULT);
         } catch (IOException e) {
-            e.printStackTrace();
+            throw new ElasticsearchException("Error in bulk request");
         }
-
-
     }
 
     /**
@@ -265,9 +254,7 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
         try {
             getMappingsResponse = client.indices().getMapping(indices, RequestOptions.DEFAULT);
         } catch (IOException e) {
-
-            e.printStackTrace();
-            return false;
+            throw new ElasticsearchException("Error getting mapping " + mappingName);
         }
 
         return getMappingsResponse.mappings().get(mappingName) != null;
@@ -277,14 +264,13 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
      * Simulate a SELET * FROM index.mapping WHERE (One simple filter)
      *
      * @param indexName
-     * @param mappingName
      * @param columnName
      * @param value
      * @param filterType  [equals, gt, gte, lt, lte]
      * @return ArrayList with all the rows(One element of the ArrayList is a JSON document)
      * @throws Exception
      */
-    public List<JSONObject> searchSimpleFilterElasticsearchQuery(String indexName, String mappingName, String
+    public List<JSONObject> searchSimpleFilterElasticsearchQuery(String indexName, String
             columnName, Object value, String filterType) throws Exception {
         List<JSONObject> resultsJSON = new ArrayList<JSONObject>();
         QueryBuilder query;
@@ -327,18 +313,17 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
      * Indexes a document.
      *
      * @param indexName
-     * @param mappingName
      * @param id          unique identifier of the document
      * @param document
      * @throws Exception
      */
-    public void indexDocument(String indexName, String mappingName, String id, XContentBuilder document) {
+    public void indexDocument(String indexName, String id, XContentBuilder document) {
 
         IndexRequest request = new IndexRequest(indexName).id(id).source(document);
         try {
             client.index(request, RequestOptions.DEFAULT);
         } catch (IOException e) {
-            e.printStackTrace();
+            throw new ElasticsearchException("Error indexing document");
         }
     }
 
@@ -346,10 +331,9 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
      * Deletes a document by its id.
      *
      * @param indexName
-     * @param mappingName
      * @param id
      */
-    public void deleteDocument(String indexName, String mappingName, String id) {
+    public void deleteDocument(String indexName, String id) {
 
         DeleteRequest deleteRequest = new DeleteRequest(indexName, id);
         try {
@@ -357,13 +341,12 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
             client.delete(deleteRequest, RequestOptions.DEFAULT);
 
         } catch (IOException e) {
-            e.printStackTrace();
+            throw new ElasticsearchException("Error deleting document");
         }
     }
 
     private static SSLContext initializeSSLContext(String keyStore, String keyStorePass, String truststore, String truststorePass) throws SSLException {
         try {
-
 
             Path keyStorePath = Paths.get(keyStore);
             Path truststorePath = Paths.get(truststore);
@@ -396,4 +379,3 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
         }
     }
 }
-
