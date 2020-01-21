@@ -132,8 +132,8 @@ public class DatabaseSpec extends BaseGSpec {
      * @throws UnknownHostException  exception
      * @throws NumberFormatException exception
      */
-    @Given("^I connect to Elasticsearch cluster at host '(.+?)'( using native port '(.+?)')?( with trustStorePath '(.+?)' and trustStorePassword '(.+?)' with keyStorePath '(.+?)' and keyStorePassword '(.+?)')?( using cluster name '(.+?)')?$")
-    public void connectToElasticSearch(String host, String foo, String nativePort, String bar, String trustorePath, String trustStorePassword, String keyStorePath, String keyStorePassword, String clusterName) throws NumberFormatException, SSLException {
+    @Given("^I connect to Elasticsearch cluster at host '(.+?)'( using native port '(.+?)')? with trustStorePath '(.+?)' and trustStorePassword '(.+?)' with keyStorePath '(.+?)' and keyStorePassword '(.+?)'( using cluster name '(.+?)')?$")
+    public void connectToElasticSearch(String host, String nativePort, String trustorePath, String trustStorePassword, String keyStorePath, String keyStorePassword, String clusterName) throws NumberFormatException, SSLException {
 //    @Given("^I connect to Elasticsearch cluster at host '(.+?)'( using native port '(.+?)')?( using cluster name '(.+?)')?$")
 //    public void connectToElasticSearch(String host, String foo, String nativePort, String bar, String clusterName) throws DBException, UnknownHostException, NumberFormatException {
         LinkedHashMap<String, Object> settings_map = new LinkedHashMap<String, Object>();
