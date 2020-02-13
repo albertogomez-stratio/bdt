@@ -35,7 +35,6 @@ import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.protocol.HttpClientContext;
 import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
-import org.apache.http.conn.ssl.TrustSelfSignedStrategy;
 import org.apache.http.cookie.Cookie;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.impl.client.LaxRedirectStrategy;
@@ -94,11 +93,14 @@ public class GosecSSOUtils {
                 .setRedirectStrategy(new LaxRedirectStrategy())
                 .setDefaultRequestConfig(RequestConfig.custom()
                 .setCookieSpec(CookieSpecs.STANDARD).setCircularRedirectsAllowed(true).build());
+
         if (!this.verifyHost) {
             SSLConnectionSocketFactory scsf = new SSLConnectionSocketFactory(SSLContexts.custom().
-                    loadTrustMaterial(null, new TrustSelfSignedStrategy()).build(), NoopHostnameVerifier.INSTANCE);
+                    loadTrustMaterial((chain, authType) -> true)
+                    .build(), NoopHostnameVerifier.INSTANCE);
             clientBuilder.setSSLSocketFactory(scsf);
         }
+
         HttpClient client = clientBuilder.build();
         try {
             HttpResponse firstResponse = client.execute(httpGet, context);

@@ -29,6 +29,8 @@ import org.assertj.core.api.Assertions;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.Future;
 import java.util.regex.Matcher;
@@ -95,7 +97,7 @@ public class DcosSpec extends BaseGSpec {
      * @throws Exception exception
      */
     private void authenticateDCOS(String remoteHost, String email, String user, String password, String pemFile, String remotePort) throws Exception {
-        commonspec.setRemoteSSHConnection(new RemoteSSHConnection(user, password, remoteHost, remotePort, pemFile));
+        commonspec.setRemoteSSHConnection(new RemoteSSHConnection(user, password, remoteHost, remotePort, pemFile), remoteHost + "_" + user);
         commonspec.getRemoteSSHConnection().runCommand("sudo cat /var/lib/dcos/dcos-oauth/auth-token-secret");
         String DCOSsecret = commonspec.getRemoteSSHConnection().getResult().trim();
         setDCOSCookie(DCOSsecret, email);
@@ -134,6 +136,14 @@ public class DcosSpec extends BaseGSpec {
             }
             List<com.ning.http.client.cookie.Cookie> cookiesAtributes = addSsoToken(ssoCookies, tokenList);
 
+            this.commonspec.getLogger().debug("Cookies to set:");
+            for (String cookie:tokenList) {
+                this.commonspec.getLogger().debug("\t" + cookie + ":" + ssoCookies.get(cookie));
+            }
+
+            if (ssoCookies.get("dcos-acs-auth-cookie") != null) {
+                ThreadProperty.set("dcosAuthCookie", ssoCookies.get("dcos-acs-auth-cookie"));
+            }
             commonspec.setCookies(cookiesAtributes);
         }
     }
@@ -162,7 +172,7 @@ public class DcosSpec extends BaseGSpec {
         Set<String> hostList = new HashSet(Arrays.asList(hosts.split(",")));
 
         //Get the list of currently used hosts
-        commonspec.executeCommand("dcos task | awk '{print $2}'", 0, null);
+        commonspec.executeCommand("dcos task | awk '{print $2}'", null, 0, null);
         String results = commonspec.getRemoteSSHConnection().getResult();
         Set<String> usedHosts = new HashSet(Arrays.asList(results.replaceAll("\r", "").split("\n")));
 
@@ -186,10 +196,10 @@ public class DcosSpec extends BaseGSpec {
      */
     @Given("^services '(.*?)' are splitted correctly in datacenters$")
     public void checkServicesDistributionMultiDataCenter(String serviceList) throws Exception {
-        commonspec.executeCommand("dcos node --json >> aux.txt", 0, null);
-        commonspec.executeCommand("cat aux.txt", 0, null);
+        commonspec.executeCommand("dcos node --json >> aux.txt", null, 0, null);
+        commonspec.executeCommand("cat aux.txt", null, 0, null);
         checkDataCentersDistribution(serviceList.split(","), obtainsDataCenters(commonspec.getRemoteSSHConnection().getResult()).split(";"));
-        commonspec.executeCommand("rm -rf aux.txt", 0, null);
+        commonspec.executeCommand("rm -rf aux.txt", null, 0, null);
     }
 
     /**
@@ -211,7 +221,7 @@ public class DcosSpec extends BaseGSpec {
         int resto = serviceListArray.length % dataCentersIpsArray.length;
 
         for (int i = 0; i < serviceListArray.length; i++) {
-            commonspec.executeCommand("dcos task | grep " + serviceListArray[i] + " | awk '{print $2}'", 0, null);
+            commonspec.executeCommand("dcos task | grep " + serviceListArray[i] + " | awk '{print $2}'", null, 0, null);
             String service_ip = commonspec.getRemoteSSHConnection().getResult();
             for (int x = 0; x < dataCentersIpsArray.length; x++) {
                 if (dataCentersIpsArray[x].toLowerCase().contains(service_ip.toLowerCase())) {
@@ -334,10 +344,26 @@ public class DcosSpec extends BaseGSpec {
      * @param envVar     environment variable where to store json
      * @throws Exception exception     *
      */
-    @Given("^I convert jsonSchema '(.+?)' to json and save it in variable '(.+?)'")
-    public void convertJSONSchemaToJSON(String jsonSchema, String envVar) throws Exception {
+    @Given("^I convert jsonSchema '(.+?)' to json( and save it in variable '(.+?)')?( and save it in file '(.+?)')?")
+    public void convertJSONSchemaToJSON(String jsonSchema, String envVar, String fileName) throws Exception {
         String json = commonspec.parseJSONSchema(new JSONObject(jsonSchema)).toString();
-        ThreadProperty.set(envVar, json);
+        if (envVar != null) {
+            ThreadProperty.set(envVar, json);
+        }
+        if (fileName != null) {
+            File tempDirectory = new File(System.getProperty("user.dir") + "/target/test-classes/");
+            String absolutePathFile = tempDirectory.getAbsolutePath() + "/" + fileName;
+            commonspec.getLogger().debug("Creating file {} in 'target/test-classes'", absolutePathFile);
+            // Note that this Writer will delete the file if it exists
+            Writer out = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(absolutePathFile), StandardCharsets.UTF_8));
+            try {
+                out.write(json);
+            } catch (Exception e) {
+                commonspec.getLogger().error("Custom file {} hasn't been created:\n{}", absolutePathFile, e.toString());
+            } finally {
+                out.close();
+            }
+        }
     }
 
     /**

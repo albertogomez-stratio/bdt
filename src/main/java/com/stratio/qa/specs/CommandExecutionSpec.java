@@ -19,6 +19,7 @@ package com.stratio.qa.specs;
 import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.Session;
 import com.stratio.qa.utils.RemoteSSHConnection;
+import com.stratio.qa.utils.RemoteSSHConnectionsUtil;
 import com.stratio.qa.utils.ThreadProperty;
 import cucumber.api.java.en.Given;
 import cucumber.api.java.en.Then;
@@ -58,22 +59,31 @@ public class CommandExecutionSpec extends BaseGSpec {
      * @param pemFile    (required if password null)
      * @throws Exception exception
      */
-    @Given("^I open a ssh connection to '(.+?)'( in port '(.+?)')? with user '(.+?)'( and password '(.+?)')?( using pem file '(.+?)')?$")
-    public void openSSHConnection(String remoteHost, String remotePort, String user, String password, String pemFile) throws Exception {
+    @Given("^I open a ssh connection to '(.+?)'( in port '(.+?)')? with user '(.+?)'( and password '(.+?)')?( using pem file '(.+?)')?( and saved with id '(.+?)')?$")
+    public void openSSHConnection(String remoteHost, String remotePort, String user, String password, String pemFile, String sshConnectionId) throws Exception {
+        String sshConnectionIdAux = sshConnectionId != null ? sshConnectionId : remoteHost + "_" + user;
+        if (RemoteSSHConnectionsUtil.getRemoteSSHConnectionsMap().get(sshConnectionId) != null) {
+            RemoteSSHConnectionsUtil.getRemoteSSHConnectionsMap().get(sshConnectionId).getSession().disconnect();
+        }
         if ((pemFile == null) || (pemFile.equals("none"))) {
             if (password == null) {
                 throw new Exception("You have to provide a password or a pem file to be used for connection");
             }
-            commonspec.setRemoteSSHConnection(new RemoteSSHConnection(user, password, remoteHost, remotePort, null));
+            commonspec.setRemoteSSHConnection(new RemoteSSHConnection(user, password, remoteHost, remotePort, null), sshConnectionIdAux);
             commonspec.getLogger().debug("Opening ssh connection with password: { " + password + "}", commonspec.getRemoteSSHConnection());
         } else {
             File pem = new File(pemFile);
             if (!pem.exists()) {
                 throw new Exception("Pem file: " + pemFile + " does not exist");
             }
-            commonspec.setRemoteSSHConnection(new RemoteSSHConnection(user, null, remoteHost, remotePort, pemFile));
+            commonspec.setRemoteSSHConnection(new RemoteSSHConnection(user, null, remoteHost, remotePort, pemFile), sshConnectionIdAux);
             commonspec.getLogger().debug("Opening ssh connection with pemFile: {}", commonspec.getRemoteSSHConnection());
         }
+    }
+
+    @Deprecated
+    public void openSSHConnection(String remoteHost, String remotePort, String user, String password, String pemFile) throws Exception {
+        openSSHConnection(remoteHost, remotePort, user, password, pemFile, null);
     }
 
     /*
@@ -131,14 +141,19 @@ public class CommandExecutionSpec extends BaseGSpec {
      * @param envVar     environment variable name
      * @throws Exception exception
      **/
-    @Given("^I run '(.+?)' in the ssh connection( with exit status '(.+?)')?( and save the value in environment variable '(.+?)')?$")
-    public void executeCommand(String command, String sExitStatus, String envVar) throws Exception {
+    @Given("^I run '(.+?)' in the ssh connection( with id '(.+?)')?( with exit status '(.+?)')?( and save the value in environment variable '(.+?)')?$")
+    public void executeCommand(String command, String sshConnectionId, String sExitStatus, String envVar) throws Exception {
         Integer exitStatus = sExitStatus != null ? Integer.valueOf(sExitStatus) : null;
         if (exitStatus == null) {
             exitStatus = 0;
         }
 
-        commonspec.executeCommand(command, exitStatus, envVar);
+        commonspec.executeCommand(command, sshConnectionId, exitStatus, envVar);
+    }
+
+    @Deprecated
+    public void executeCommand(String command, String sExitStatus, String envVar) throws Exception {
+        executeCommand(command, null, sExitStatus, envVar);
     }
 
     /**
@@ -408,5 +423,26 @@ public class CommandExecutionSpec extends BaseGSpec {
                 "-rp -i /" + pem + " " + localPath + " " +
                 user + "@" + node + ":" +
                 remotePath + " &\n";
+    }
+
+    /**
+     * Set SSH connection as active
+     *
+     * @param sshConnectionId
+     **/
+    @Then("^I put remote SSH connection with id '(.+?)' as active$")
+    public void setActiveSSHConnection(String sshConnectionId) throws Exception {
+        RemoteSSHConnectionsUtil.setLastRemoteSSHConnection(RemoteSSHConnectionsUtil.getRemoteSSHConnectionsMap().get(sshConnectionId));
+    }
+
+    /**
+     * Close SSH connection
+     *
+     * @param sshConnectionId
+     **/
+    @Then("^I close SSH connection with id '(.+?)'$")
+    public void closeSSHConnection(String sshConnectionId) throws Exception {
+        RemoteSSHConnectionsUtil.getRemoteSSHConnectionsMap().get(sshConnectionId).getSession().disconnect();
+        RemoteSSHConnectionsUtil.getRemoteSSHConnectionsMap().remove(sshConnectionId);
     }
 }

@@ -272,14 +272,6 @@ public class HookGSpec extends BaseGSpec {
         commonspec.getClient().close();
     }
 
-    @After(order = 10)
-    public void remoteSSHConnectionTeardown() throws Exception {
-        if (commonspec.getRemoteSSHConnection() != null) {
-            commonspec.getLogger().debug("Closing SSH remote connection");
-            commonspec.getRemoteSSHConnection().getSession().disconnect();
-        }
-    }
-
     private boolean isTagIncludedInScenario(Scenario scenario, String customTAG) {
         Collection<String> tags = scenario.getSourceTagNames();
         return tags.contains(customTAG);

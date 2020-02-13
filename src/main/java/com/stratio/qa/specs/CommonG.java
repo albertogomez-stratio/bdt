@@ -126,8 +126,6 @@ public class CommonG {
 
     private String webPort;
 
-    private RemoteSSHConnection remoteSSHConnection;
-
     private int commandExitStatus;
 
     private String commandResult;
@@ -165,14 +163,23 @@ public class CommonG {
      * @return RemoteConnection
      */
     public RemoteSSHConnection getRemoteSSHConnection() {
-        return remoteSSHConnection;
+        return RemoteSSHConnectionsUtil.getLastRemoteSSHConnection();
     }
 
     /**
      * Set the remote connection.
      */
+    @Deprecated
     public void setRemoteSSHConnection(RemoteSSHConnection remoteSSHConnection) {
-        this.remoteSSHConnection = remoteSSHConnection;
+        setRemoteSSHConnection(remoteSSHConnection, "default");
+    }
+
+    /**
+     * Set the remote connection.
+     */
+    public void setRemoteSSHConnection(RemoteSSHConnection remoteSSHConnection, String sshConnectionId) {
+        RemoteSSHConnectionsUtil.getRemoteSSHConnectionsMap().put(sshConnectionId, remoteSSHConnection);
+        RemoteSSHConnectionsUtil.setLastRemoteSSHConnection(remoteSSHConnection);
     }
 
     /**
@@ -2428,23 +2435,37 @@ public class CommonG {
     /**
      * Executes the command specified in remote system
      *
-     * @param command    command to be run locally
-     * @param exitStatus command exit status
-     * @param envVar     environment variable name
+     * @param command           command to be run locally
+     * @param exitStatus        command exit status
+     * @param envVar            environment variable name
      * @throws Exception exception
      **/
+    @Deprecated
     public void executeCommand(String command, Integer exitStatus, String envVar) throws Exception {
+        executeCommand(command, null, exitStatus, envVar);
+    }
+
+    /**
+     * Executes the command specified in remote system
+     *
+     * @param command           command to be run locally
+     * @param sshConnectionId   ssh connection id
+     * @param exitStatus        command exit status
+     * @param envVar            environment variable name
+     * @throws Exception exception
+     **/
+    public void executeCommand(String command, String sshConnectionId, Integer exitStatus, String envVar) throws Exception {
         if (exitStatus == null) {
             exitStatus = 0;
         }
-
+        RemoteSSHConnection remoteSSHConnection = sshConnectionId != null ? RemoteSSHConnectionsUtil.getRemoteSSHConnectionsMap().get(sshConnectionId) : getRemoteSSHConnection();
         command = "set -o pipefail && alias grep='grep --color=never' && " + command;
-        getRemoteSSHConnection().runCommand(command);
-        setCommandResult(getRemoteSSHConnection().getResult());
-        setCommandExitStatus(getRemoteSSHConnection().getExitStatus());
+        remoteSSHConnection.runCommand(command);
+        setCommandResult(remoteSSHConnection.getResult());
+        setCommandExitStatus(remoteSSHConnection.getExitStatus());
         runCommandLoggerAndEnvVar(exitStatus, envVar, Boolean.FALSE);
 
-        Assertions.assertThat(getRemoteSSHConnection().getExitStatus()).isEqualTo(exitStatus);
+        Assertions.assertThat(remoteSSHConnection.getExitStatus()).isEqualTo(exitStatus);
     }
 
     public void connectToCrossdataDatabase(boolean security, String host, String port, String keystore_path, String keystore_pwd, String truststore_path, String trustore_pwd, String user, String password, boolean pagination) throws Exception {

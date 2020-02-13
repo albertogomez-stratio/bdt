@@ -2,9 +2,48 @@
 
 Only listing significant user-visible, not internal code cleanups and minor bug fixes.
 
-## 0.13.0 (upcoming)
+## 0.14.0 (upcoming)
 
-* [LDG-1225]Added not-empty check cell in csv matcher
+* Pending changelog
+
+## 0.13.0 (February 12, 2020)
+
+* [QATM-3140] Let step convert json schema save content to file and/or variable
+* [QATM-3125] Fix error in Rocket SSO login
+* Set dcosAuthCookie as local variable in step "I set sso token
+* [QATM-3107] Keep SSH connections
+* [GS-1730] Added step to include a group to a profile including the previous configuration
+* [FRAM-4753] Change constraint private function
+* [QATM-2770] Fix 'in less than xxx' steps to avoid timeout / unknownhost exceptions
+* [QATM-3084] Empty default value for variables
+* [FRAM-4753] Change for constraint private function 
+* [FRAM-4720] Inclusion constraints scheduler
+* [FRAM-4275] Add roles hdfs service
+* [QATM-3073] Fix password creation without user
+* [QATM-3073] New steps to generate keytabs, certificates and passwords 
+* [CROSSDATA-2345] Modify Gosec policies methods to obtain ID when Gosec < 0.17
+* [QATM-3071] Fix how to get Vault IP
+* [GS-1714] Step to get json policy and save on env variable or policy
+* [GS-1714] Changed the endpoint to get all policy details
+* [GS-1707] Get REALM from bootstrap and save in variable EOS_REALM
+* [LDG-1225] Added not-empty check cell in csv matcher
+* [QATM-3028] Allow to choose user in governance header
+* [QATM-3054] Performance improvements in obtain info from bootstrap step
+* [CROSSDATA-2289] Allow remote execution in parallel script
+* [CROSSDATA-2289] New steps to execute command / copy files in all nodes
+* [QATM-3036] Use CA trusted for LDAP connection
+* [QATM-3030] Add two more variables to basic information
+* Set governance cookie
+* [QATM-3006] Add X-RolesID header for governanceAPI 1.2
+* [GS-1538] Allow response 204 deleting gosec resources
+* [QATM-2975] Null support added in query result and new step to check if table is contained in query result
+* [CROSSDATA-2232] Steps added to connect to Crossdata server through JDBC
+* [QATM-2945] Include progloop tag
+* [QATM-2932] Cambio version jdbc e introducción valor encriptacion
+* [ROCK-612] Feature/no host verifier
+* [QATM-2925] Fix NPE when we try to obtain a browser snapshot
+* [QATM-1993] Upgrade Cucumber to 4.4.0
+* [SECTY-1482] Added step to get profileId from profileName
 
 ## 0.12.0 (October 03, 2019)
 

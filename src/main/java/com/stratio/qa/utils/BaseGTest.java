@@ -25,10 +25,12 @@ import org.testng.ITestContext;
 import org.testng.annotations.*;
 
 import java.lang.reflect.Method;
+import java.util.Iterator;
+import java.util.Map;
 
 public abstract class BaseGTest {
 
-    private final Logger logger = LoggerFactory.getLogger(this.getClass().getCanonicalName());
+    protected final Logger logger = LoggerFactory.getLogger(this.getClass().getCanonicalName());
 
     protected CucumberRunner cucumberRunner;
 
@@ -105,6 +107,18 @@ public abstract class BaseGTest {
             return;
         }
         cucumberRunner.finish();
+        // Close SSH connections
+        if (RemoteSSHConnectionsUtil.getRemoteSSHConnectionsMap().size() > 0) {
+            Iterator it = RemoteSSHConnectionsUtil.getRemoteSSHConnectionsMap().entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry pair = (Map.Entry) it.next();
+                if (pair.getValue() != null) {
+                    logger.debug("Closing SSH remote connection with ID: " + pair.getKey());
+                    ((RemoteSSHConnection) pair.getValue()).getSession().disconnect();
+                }
+                it.remove();
+            }
+        }
     }
 
     /**
