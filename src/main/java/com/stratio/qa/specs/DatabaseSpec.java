@@ -47,6 +47,7 @@ import java.util.regex.Pattern;
 
 import static com.stratio.qa.assertions.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
+import static org.assertj.core.api.Assertions.in;
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 
 /**
@@ -554,6 +555,49 @@ public class DatabaseSpec extends BaseGSpec {
             commonspec.getElasticSearchClient().dropSingleIndex(index);
         }
         commonspec.getElasticSearchClient().createSingleIndex(index, settings);
+    }
+
+    /**
+     * Check number of shards from elasticsearch index.
+     *
+     * @param index
+     * @param numberOfShards
+     */
+    @Then("^The number of shards from index '(.+?)' is '(.+?)'$")
+    public void checkNumberOfShardsFromIndex(String index, String numberOfShards) {
+        assertThat(commonspec.getElasticSearchClient().getNumberOfShardsFromIndex(index)).isEqualTo(numberOfShards);
+    }
+
+    /**
+     * Obtain number of shards from elasticsearch index.
+     *
+     * @param index
+     * @param numberOfReplicas
+     */
+    @Then("^The number of shards from index '(.+?)' is '(.+?)'$")
+    public void checkNumberOfReplicasFromIndex(String index, String numberOfReplicas) {
+        assertThat(commonspec.getElasticSearchClient().getNumberOfReplicasFromIndex(index)).isEqualTo(numberOfReplicas);
+    }
+
+
+    /**
+     * Obtain number of replicas from elasticsearch index.
+     *
+     * @param index
+     */
+    @Then("^I obtain the number of shards from index '(.+?)'$")
+    public void obtainNumberOfShardsFromIndex(String index) {
+        commonspec.getElasticSearchClient().getNumberOfShardsFromIndex(index);
+    }
+
+    /**
+     * Check number of shards from elasticsearch index.
+     *
+     * @param index
+     */
+    @Then("^I obtain the number of replicas from index '(.+?)'$")
+    public void obtainNumberOfReplicasFromIndex(String index) {
+        commonspec.getElasticSearchClient().getNumberOfReplicasFromIndex(index);
     }
 
     /**
