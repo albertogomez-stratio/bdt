@@ -543,7 +543,7 @@ public class DatabaseSpec extends BaseGSpec {
      */
     @When("^I create an elasticsearch index named '(.+?)'(, with '(.*?)' shards and '(.*?)' replicas)?( removing existing index if exist)?$")
     public void createElasticsearchIndex(String index, String shards, String replicas, String removeIndex) {
-        Settings.Builder setting = Settings.builder();
+        Settings.Builder settings = Settings.builder();
 
         if (shards != null && replicas != null) {
             setting.put("index.number_of_shards", shards);
@@ -553,7 +553,7 @@ public class DatabaseSpec extends BaseGSpec {
         if (removeIndex != null && commonspec.getElasticSearchClient().indexExists(index)) {
             commonspec.getElasticSearchClient().dropSingleIndex(index);
         }
-        commonspec.getElasticSearchClient().createSingleIndex(index, setting);
+        commonspec.getElasticSearchClient().createSingleIndex(index, settings);
     }
 
     /**
