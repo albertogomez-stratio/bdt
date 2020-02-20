@@ -548,9 +548,6 @@ public class DatabaseSpec extends BaseGSpec {
         if (shards != null && replicas != null) {
             setting.put("index.number_of_shards", shards);
             setting.put("index.number_of_replicas", replicas);
-        } else {
-            setting.put("index.number_of_shards", "1");
-            setting.put("index.number_of_replicas", "1");
         }
 
         if (removeIndex != null && commonspec.getElasticSearchClient().indexExists(index)) {
