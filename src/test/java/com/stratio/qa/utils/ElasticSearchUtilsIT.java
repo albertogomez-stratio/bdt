@@ -15,6 +15,7 @@
  */
 package com.stratio.qa.utils;
 
+import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.json.JSONObject;
 import org.slf4j.Logger;

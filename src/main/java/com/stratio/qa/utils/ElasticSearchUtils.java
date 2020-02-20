@@ -135,8 +135,9 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
      * @return true if the index has been created and false if the index has not been created.
      * @throws ElasticsearchException
      */
-    public boolean createSingleIndex(String indexName) {
-        CreateIndexRequest indexRequest = new CreateIndexRequest(indexName);
+    public boolean createSingleIndex(String indexName, Settings.Builder settings) {
+        CreateIndexRequest indexRequest = new CreateIndexRequest(indexName).settings(settings);
+
         try {
             this.client.indices().create(indexRequest, RequestOptions.DEFAULT);
         } catch (IOException e) {
@@ -144,6 +145,10 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
 
         }
         return indexExists(indexName);
+    }
+
+    public boolean createSingleIndex(String indexName) {
+        return createSingleIndex(indexName, Settings.builder());
     }
 
     /**

@@ -32,6 +32,8 @@ import cucumber.api.java.en.Then;
 import cucumber.api.java.en.When;
 import io.cucumber.datatable.DataTable;
 import org.assertj.core.api.Assertions;
+import org.elasticsearch.common.settings.Setting;
+import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.testng.Assert;
 
@@ -539,12 +541,22 @@ public class DatabaseSpec extends BaseGSpec {
      *
      * @param index
      */
-    @When("^I create an elasticsearch index named '(.+?)'( removing existing index if exist)?$")
-    public void createElasticsearchIndex(String index, String removeIndex) {
+    @When("^I create an elasticsearch index named '(.+?)'(, with '(.*?)' shards and '(.*?)' replicas)?( removing existing index if exist)?$")
+    public void createElasticsearchIndex(String index, String shards, String replicas, String removeIndex) {
+        Settings.Builder setting = Settings.builder();
+
+        if (shards != null && replicas != null) {
+            setting.put("index.number_of_shards", shards);
+            setting.put("index.number_of_replicas", replicas);
+        } else {
+            setting.put("index.number_of_shards", "1");
+            setting.put("index.number_of_replicas", "1");
+        }
+
         if (removeIndex != null && commonspec.getElasticSearchClient().indexExists(index)) {
             commonspec.getElasticSearchClient().dropSingleIndex(index);
         }
-        commonspec.getElasticSearchClient().createSingleIndex(index);
+        commonspec.getElasticSearchClient().createSingleIndex(index, setting);
     }
 
     /**
