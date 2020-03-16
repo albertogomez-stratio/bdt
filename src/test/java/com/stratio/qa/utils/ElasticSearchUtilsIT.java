@@ -77,6 +77,17 @@ public class ElasticSearchUtilsIT {
     }
 
     @Test
+    public void dropAllIndexTest() throws IOException {
+        es_utils.connect();
+        if (!es_utils.indexExists("testindex")) {
+            es_utils.createSingleIndex("testindex");
+        }
+        es_utils.dropAllIndexes();
+        assertThat(es_utils.indexExists("testindex")).isFalse();
+        es_utils.getClient().close();
+    }
+
+    @Test
     public void indexDocument() throws UnknownHostException, IOException {
         es_utils.connect();
         if (es_utils.indexExists("testindex")) {

@@ -266,26 +266,6 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
         return getElasticsearchIndexSetting(indexName, "index.number_of_shards");
     }
 
-
-    /**
-     * Check if a mapping exists in an expecific index.
-     *
-     * @param indexName
-     * @param mappingName
-     * @return true if the mapping exists and false in other case
-     */
-    public boolean existsMapping(String indexName, String mappingName) {
-        GetMappingsRequest request = new GetMappingsRequest();
-        GetMappingsRequest indices = request.indices(indexName);
-        GetMappingsResponse getMappingsResponse;
-        try {
-            getMappingsResponse = client.indices().getMapping(indices, RequestOptions.DEFAULT);
-        } catch (IOException e) {
-            throw new ElasticsearchException("Error getting mapping " + mappingName);
-        }
-        return getMappingsResponse.mappings().get(mappingName) != null;
-    }
-
     /**
      * Simulate a SELET * FROM index.mapping WHERE (One simple filter)
      *
