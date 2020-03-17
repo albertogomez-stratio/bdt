@@ -148,7 +148,12 @@ public class DatabaseSpec extends BaseGSpec {
             commonspec.getElasticSearchClient().setNativePort(ES_DEFAULT_NATIVE_PORT);
         }
         commonspec.getElasticSearchClient().setHost(host);
-        commonspec.getElasticSearchClient().connect();
+
+        if (trustStorePath != null && trustStorePassword != null && keyStorePath != null  && keyStorePassword != null) {
+            commonspec.getElasticSearchClient().connect(keyStorePath, keyStorePassword, trustStorePath, trustStorePassword);
+        } else {
+            commonspec.getElasticSearchClient().connect();
+        }
     }
 
     /**

@@ -82,7 +82,7 @@ public class ElasticSearchUtils extends RestClient.FailureListener {
      * Default constructor.
      */
     public ElasticSearchUtils() {
-        this.es_host = System.getProperty("ES_NODE", "192.168.173.2");
+        this.es_host = System.getProperty("ES_NODE", "127.0.0.1");
         this.es_native_port = Integer.valueOf(System.getProperty("ES_NATIVE_PORT", "9200"));
     }
 
